@@ -64,6 +64,7 @@ class FedZeroServer(Server):
         self.start_time = scenario.start_date
         self.end_time = scenario.end_date
         self.writer = writer
+        self.last_loss = None
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
 
     # pylint: disable=too-many-locals
@@ -104,6 +105,8 @@ class FedZeroServer(Server):
                         self.parameters = parameters
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
+                    self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
+
                     break
                 now += timedelta(minutes=5)  # wait for 5 min and try again
 
@@ -210,8 +213,14 @@ class FedZeroServer(Server):
         training_accs = {client_proxy.cid: result.metrics["local_acc"] for client_proxy, result in results}
         statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in results}
 
+        agg_local_train_loss_delta = np.nan
+        if self.last_loss != None:
+            # Update to weighted mean
+            agg_local_train_loss_delta = np.mean([loss - old_loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())])
         agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
         agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
+
+        self.last_loss = training_losses
 
         for client in self.client_load_api.get_clients():
             if client.name in training_losses:
@@ -225,6 +234,7 @@ class FedZeroServer(Server):
 
         parameters_aggregated, metrics_aggregated = aggregated_result
         metrics_aggregated["local_train_loss"] = agg_local_train_loss
+        metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
         metrics_aggregated["local_train_acc"] = agg_local_train_acc
         return parameters_aggregated, metrics_aggregated, (results, failures), participation, now + round_duration
 
