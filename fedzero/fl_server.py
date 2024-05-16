@@ -106,6 +106,7 @@ class FedZeroServer(Server):
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
                     self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_loss_delta", metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
 
                     break
                 now += timedelta(minutes=5)  # wait for 5 min and try again
@@ -210,13 +211,17 @@ class FedZeroServer(Server):
             raise RuntimeError(f"Round {server_round} ({now}) received {len(results)} results and {len(failures)} failures")
 
         training_losses = {client_proxy.cid: result.metrics["local_loss"] for client_proxy, result in results}
+        training_sample_size = {client_proxy.cid: result.metrics["number_samples"] for client_proxy, result in results}
         training_accs = {client_proxy.cid: result.metrics["local_acc"] for client_proxy, result in results}
         statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in results}
 
         agg_local_train_loss_delta = np.nan
+        agg_local_weighted_train_loss_delta = np.nan
         if self.last_loss != None:
             # Update to weighted mean
-            agg_local_train_loss_delta = np.mean([loss - old_loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())])
+            delta = [loss - old_loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
+            agg_local_train_loss_delta = np.average(delta, weights=None)
+            agg_local_weighted_train_loss_delta = np.average(delta, weights=list(training_sample_size.values()))
         agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
         agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
 
@@ -235,6 +240,7 @@ class FedZeroServer(Server):
         parameters_aggregated, metrics_aggregated = aggregated_result
         metrics_aggregated["local_train_loss"] = agg_local_train_loss
         metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
+        metrics_aggregated["local_weighted_train_loss_delta"] = agg_local_weighted_train_loss_delta
         metrics_aggregated["local_train_acc"] = agg_local_train_acc
         return parameters_aggregated, metrics_aggregated, (results, failures), participation, now + round_duration
 

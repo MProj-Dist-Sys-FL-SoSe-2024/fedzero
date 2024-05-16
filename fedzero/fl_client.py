@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from flwr.client import NumPyClient
 
+from .config import BATCH_SIZE
+
 
 class FedZeroClient(NumPyClient):
     def __init__(self, client_name, net, trainloader, optimizer, opt_args, proximal_mu, device):
@@ -33,12 +35,13 @@ class FedZeroClient(NumPyClient):
         # print(f'Client {self.client_name} local acc is {local_round_acc}')
         return flwr_get_parameters(self.net), len(self.trainloader), {'local_loss': local_round_loss,
                                                                       'local_acc': local_round_acc,
-                                                                      'statistical_utility': statistical_utility}
+                                                                      'statistical_utility': statistical_utility,
+                                                                      'number_samples': len(self.trainloader) * BATCH_SIZE}
 
     def evaluate(self, parameters, config):
         flwr_set_parameters(self.net, parameters)
-        loss, accuracy = test(self.net, self.trainlloader, self.device)
-        return float(loss), len(self.trainlloader), {"accuracy": float(accuracy)}
+        loss, accuracy = test(self.net, self.trainloader, self.device)
+        return float(loss), len(self.trainloader), {"accuracy": float(accuracy)}
 
 
 def flwr_get_parameters(net) -> List[np.ndarray]:
