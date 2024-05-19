@@ -223,14 +223,14 @@ class FedZeroServer(Server):
         agg_local_weighted_train_acc_delta = np.nan
         if self.last_loss != None:
             try:
-                delta = [old_loss - loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
+                delta = [abs(old_loss - loss) for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
                 agg_local_train_loss_delta = np.average(delta, weights=None)
                 agg_local_weighted_train_loss_delta = np.average(delta, weights=list(training_sample_size.values()))
             except:
                 pass            
         if self.last_accuracy != None:
             try:
-                delta = [old_acc - acc for acc, old_acc in zip (training_accs.values(), self.last_accuracy.values())]
+                delta = [abs(old_acc - acc) for acc, old_acc in zip (training_accs.values(), self.last_accuracy.values())]
                 agg_local_train_acc_delta = np.average(delta, weights=None)
                 agg_local_weighted_train_acc_delta = np.average(delta, weights=list(training_sample_size.values()))
             except:
