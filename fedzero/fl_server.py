@@ -217,29 +217,32 @@ class FedZeroServer(Server):
         training_accs = {client_proxy.cid: result.metrics["local_acc"] for client_proxy, result in results}
         statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in results}
 
+        print(training_sample_size, flush=True)
+
+        avg_train_acc = np.nan
+        weighted_avg_train_acc = np.nan
+        avg_train_loss = np.nan
+        weighted_avg_train_loss = np.nan
         agg_local_train_loss_delta = np.nan
         agg_local_weighted_train_loss_delta = np.nan
         agg_local_train_acc_delta = np.nan
         agg_local_weighted_train_acc_delta = np.nan
         if self.last_loss != None:
-            try:
-                delta = [abs(old_loss - loss) for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
-                agg_local_train_loss_delta = np.average(delta, weights=None)
-                agg_local_weighted_train_loss_delta = np.average(delta, weights=list(training_sample_size.values()))
-            except:
-                pass            
+            avg_train_loss = np.mean(list(training_losses.values()))
+            weighted_avg_train_loss = np.average(list(training_losses.values()), weights=list(training_sample_size.values()))
+            agg_local_train_loss_delta = abs(weighted_avg_train_loss - self.last_loss[1])
+            agg_local_weighted_train_loss_delta = abs(avg_train_loss - self.last_loss[0])
         if self.last_accuracy != None:
-            try:
-                delta = [abs(old_acc - acc) for acc, old_acc in zip (training_accs.values(), self.last_accuracy.values())]
-                agg_local_train_acc_delta = np.average(delta, weights=None)
-                agg_local_weighted_train_acc_delta = np.average(delta, weights=list(training_sample_size.values()))
-            except:
-                pass
+            avg_train_acc = np.mean(list(training_accs.values()))
+            weighted_avg_train_acc = np.average(list(training_accs.values()), weights=list(training_sample_size.values()))
+            agg_local_train_acc_delta = abs(weighted_avg_train_acc - self.last_accuracy[1])
+            agg_local_weighted_train_acc_delta = abs(avg_train_acc - self.last_accuracy[0])
+
         agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
         agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
 
-        self.last_loss = training_losses
-        self.last_accuracy = training_accs
+        self.last_loss = (avg_train_loss, weighted_avg_train_loss)
+        self.last_accuracy = (avg_train_acc, weighted_avg_train_acc)
 
         for client in self.client_load_api.get_clients():
             if client.name in training_losses:

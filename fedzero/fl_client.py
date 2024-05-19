@@ -36,12 +36,12 @@ class FedZeroClient(NumPyClient):
         return flwr_get_parameters(self.net), len(self.trainloader), {'local_loss': local_round_loss,
                                                                       'local_acc': local_round_acc,
                                                                       'statistical_utility': statistical_utility,
-                                                                      'number_samples': len(self.trainloader) * BATCH_SIZE}
+                                                                      'number_samples': len(self.trainloader)}
 
     def evaluate(self, parameters, config):
         flwr_set_parameters(self.net, parameters)
-        loss, accuracy = test(self.net, self.trainloader, self.device)
-        return float(loss), len(self.trainloader), {"accuracy": float(accuracy)}
+        loss, accuracy = test(self.net, self.trainlloader, self.device)
+        return float(loss), len(self.trainlloader), {"accuracy": float(accuracy)}
 
 
 def flwr_get_parameters(net) -> List[np.ndarray]:
