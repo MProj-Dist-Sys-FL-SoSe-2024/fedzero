@@ -65,6 +65,7 @@ class FedZeroServer(Server):
         self.end_time = scenario.end_date
         self.writer = writer
         self.last_loss = None
+        self.last_accuracy = None
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
 
     # pylint: disable=too-many-locals
@@ -104,10 +105,11 @@ class FedZeroServer(Server):
                     if parameters:
                         self.parameters = parameters
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
-                    self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
                     self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
                     self.writer.add_scalar("weighted_train_loss_delta", metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
-
+                    self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
+                    self.writer.add_scalar("train_accuracy_delta", metrics.get("local_train_acc_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_accuracy_delta", metrics.get("local_weighted_train_acc_delta", np.nan), **tb_props)
                     break
                 now += timedelta(minutes=5)  # wait for 5 min and try again
 
@@ -217,15 +219,27 @@ class FedZeroServer(Server):
 
         agg_local_train_loss_delta = np.nan
         agg_local_weighted_train_loss_delta = np.nan
+        agg_local_train_acc_delta = np.nan
+        agg_local_weighted_train_acc_delta = np.nan
         if self.last_loss != None:
-            # Update to weighted mean
-            delta = [loss - old_loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
-            agg_local_train_loss_delta = np.average(delta, weights=None)
-            agg_local_weighted_train_loss_delta = np.average(delta, weights=list(training_sample_size.values()))
+            try:
+                delta = [old_loss - loss for loss, old_loss in zip(training_losses.values(), self.last_loss.values())]
+                agg_local_train_loss_delta = np.average(delta, weights=None)
+                agg_local_weighted_train_loss_delta = np.average(delta, weights=list(training_sample_size.values()))
+            except:
+                pass            
+        if self.last_accuracy != None:
+            try:
+                delta = [old_acc - acc for acc, old_acc in zip (training_accs.values(), self.last_accuracy.values())]
+                agg_local_train_acc_delta = np.average(delta, weights=None)
+                agg_local_weighted_train_acc_delta = np.average(delta, weights=list(training_sample_size.values()))
+            except:
+                pass
         agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
         agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
 
         self.last_loss = training_losses
+        self.last_accuracy = training_accs
 
         for client in self.client_load_api.get_clients():
             if client.name in training_losses:
@@ -242,6 +256,8 @@ class FedZeroServer(Server):
         metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
         metrics_aggregated["local_weighted_train_loss_delta"] = agg_local_weighted_train_loss_delta
         metrics_aggregated["local_train_acc"] = agg_local_train_acc
+        metrics_aggregated["local_train_acc_delta"] = agg_local_train_acc_delta
+        metrics_aggregated["local_weighted_train_acc_delta"] = agg_local_weighted_train_acc_delta
         return parameters_aggregated, metrics_aggregated, (results, failures), participation, now + round_duration
 
 
