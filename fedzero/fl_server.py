@@ -65,8 +65,18 @@ class FedZeroServer(Server):
         self.end_time = scenario.end_date
         self.writer = writer
         self.last_loss = None
+        self.last_loss_ema = None
         self.last_accuracy = None
+        self.last_accuracy_ema = None
+        self.ema_window = 5
+        self.ema_alpha = (2 / (self.ema_window + 1))
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
+
+    @staticmethod
+    def ema(current, last, alpha):
+        current_factored = alpha * current
+        last_factored = (1 - alpha) * last
+        return current_factored + last_factored
 
     # pylint: disable=too-many-locals
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
@@ -106,10 +116,14 @@ class FedZeroServer(Server):
                         self.parameters = parameters
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
                     self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("train_loss_delta_ema", metrics.get("local_train_loss_delta_ema", np.nan), **tb_props)
                     self.writer.add_scalar("weighted_train_loss_delta", metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_loss_delta_ema", metrics.get("local_weighted_train_loss_delta_ema", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy_delta", metrics.get("local_train_acc_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("train_accuracy_delta_ema", metrics.get("local_train_acc_delta_ema", np.nan), **tb_props)
                     self.writer.add_scalar("weighted_train_accuracy_delta", metrics.get("local_weighted_train_acc_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_accuracy_delta_ema", metrics.get("local_weighted_train_acc_delta_ema", np.nan), **tb_props)
                     break
                 now += timedelta(minutes=5)  # wait for 5 min and try again
 
@@ -238,11 +252,26 @@ class FedZeroServer(Server):
             agg_local_train_acc_delta = abs(weighted_avg_train_acc - self.last_accuracy[1])
             agg_local_weighted_train_acc_delta = abs(avg_train_acc - self.last_accuracy[0])
 
-        agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
         agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
-
-        self.last_loss = (avg_train_loss, weighted_avg_train_loss)
+        agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
+        
         self.last_accuracy = (avg_train_acc, weighted_avg_train_acc)
+        self.last_loss = (avg_train_loss, weighted_avg_train_loss)
+
+        # calc ema
+        if (self.last_accuracy_ema is None or self.last_loss_ema is None) \
+            or (np.nan in self.last_accuracy_ema or np.nan in self.last_loss_ema):
+            self.last_accuracy_ema = self.last_accuracy
+            self.last_loss_ema = self.last_loss
+        else:
+            self.last_accuracy_ema = (
+                FedZeroServer.ema(agg_local_train_acc_delta, self.last_accuracy_ema[0], self.ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_acc_delta, self.last_accuracy_ema[1], self.ema_alpha)
+            )
+            self.last_loss_ema = (
+                FedZeroServer.ema(agg_local_train_loss_delta, self.last_loss_ema[0], self.ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_loss_delta, self.last_loss_ema[1], self.ema_alpha)
+            )
 
         for client in self.client_load_api.get_clients():
             if client.name in training_losses:
@@ -255,12 +284,16 @@ class FedZeroServer(Server):
         ] = self.strategy.aggregate_fit(server_round, results, failures)
 
         parameters_aggregated, metrics_aggregated = aggregated_result
-        metrics_aggregated["local_train_loss"] = agg_local_train_loss
-        metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
-        metrics_aggregated["local_weighted_train_loss_delta"] = agg_local_weighted_train_loss_delta
         metrics_aggregated["local_train_acc"] = agg_local_train_acc
         metrics_aggregated["local_train_acc_delta"] = agg_local_train_acc_delta
+        metrics_aggregated["local_train_acc_delta_ema"] = self.last_accuracy_ema[0]
         metrics_aggregated["local_weighted_train_acc_delta"] = agg_local_weighted_train_acc_delta
+        metrics_aggregated["local_weighted_train_acc_delta_ema"] = self.last_accuracy_ema[1]
+        metrics_aggregated["local_train_loss"] = agg_local_train_loss
+        metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
+        metrics_aggregated["local_train_loss_delta_ema"] = self.last_loss_ema[0]
+        metrics_aggregated["local_weighted_train_loss_delta"] = agg_local_weighted_train_loss_delta
+        metrics_aggregated["local_weighted_train_loss_delta_ema"] = self.last_loss_ema[1]
         return parameters_aggregated, metrics_aggregated, (results, failures), participation, now + round_duration
 
 
