@@ -64,13 +64,14 @@ class FedZeroServer(Server):
         self.start_time = scenario.start_date
         self.end_time = scenario.end_date
         self.writer = writer
-        self.last_loss = None
-        self.last_loss_ema = None
-        self.last_accuracy = None
-        self.last_accuracy_ema = None
-        self.ema_window = 5
-        self.ema_alpha = (2 / (self.ema_window + 1))
+        self._last_agg_local_loss = None
+        self._last_agg_local_loss_ema = None
+        self._last_agg_local_accuracy = None
+        self._last_agg_local_accuracy_ema = None
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
+
+    _ema_window = 5
+    _ema_alpha = (2 / (_ema_window + 1))
 
     @staticmethod
     def ema(current, last, alpha):
@@ -114,11 +115,13 @@ class FedZeroServer(Server):
                     duration = new_now - now
                     if parameters:
                         self.parameters = parameters
+                    # Write Loss Metrics
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
                     self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
                     self.writer.add_scalar("train_loss_delta_ema", metrics.get("local_train_loss_delta_ema", np.nan), **tb_props)
                     self.writer.add_scalar("weighted_train_loss_delta", metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
                     self.writer.add_scalar("weighted_train_loss_delta_ema", metrics.get("local_weighted_train_loss_delta_ema", np.nan), **tb_props)
+                    # Write Accuracy Metrics
                     self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy_delta", metrics.get("local_train_acc_delta", np.nan), **tb_props)
                     self.writer.add_scalar("train_accuracy_delta_ema", metrics.get("local_train_acc_delta_ema", np.nan), **tb_props)
@@ -231,46 +234,58 @@ class FedZeroServer(Server):
         training_accs = {client_proxy.cid: result.metrics["local_acc"] for client_proxy, result in results}
         statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in results}
 
-        print(training_sample_size, flush=True)
+        # Initialise the variables for accuracy
+        agg_local_train_acc = np.nan # mean average
+        agg_local_weighted_avg_train_acc = np.nan # weighted average
+        agg_local_train_acc_delta = np.nan # weighted average delta
+        agg_local_weighted_train_acc_delta = np.nan # weighted average delta ema smoothed
 
-        avg_train_acc = np.nan
-        weighted_avg_train_acc = np.nan
-        avg_train_loss = np.nan
-        weighted_avg_train_loss = np.nan
-        agg_local_train_loss_delta = np.nan
-        agg_local_weighted_train_loss_delta = np.nan
-        agg_local_train_acc_delta = np.nan
-        agg_local_weighted_train_acc_delta = np.nan
-        if self.last_loss != None:
-            avg_train_loss = np.mean(list(training_losses.values()))
-            weighted_avg_train_loss = np.average(list(training_losses.values()), weights=list(training_sample_size.values()))
-            agg_local_train_loss_delta = abs(weighted_avg_train_loss - self.last_loss[1])
-            agg_local_weighted_train_loss_delta = abs(avg_train_loss - self.last_loss[0])
-        if self.last_accuracy != None:
-            avg_train_acc = np.mean(list(training_accs.values()))
-            weighted_avg_train_acc = np.average(list(training_accs.values()), weights=list(training_sample_size.values()))
-            agg_local_train_acc_delta = abs(weighted_avg_train_acc - self.last_accuracy[1])
-            agg_local_weighted_train_acc_delta = abs(avg_train_acc - self.last_accuracy[0])
+        # Aggregate Accuracy
+        agg_local_train_acc = np.mean(list(training_accs.values()))
+        if self._last_agg_local_accuracy != None:
+            agg_local_weighted_avg_train_acc = np.average(list(training_accs.values()), weights=list(training_sample_size.values()))
+            agg_local_train_acc_delta = abs(agg_local_weighted_avg_train_acc - self._last_agg_local_accuracy[1])
+            agg_local_weighted_train_acc_delta = abs(agg_local_train_acc - self._last_agg_local_accuracy[0])
 
-        agg_local_train_acc = np.mean([acc for acc in training_accs.values()])
-        agg_local_train_loss = np.mean([loss for loss in training_losses.values()])
+        self._last_agg_local_accuracy = (
+            agg_local_train_acc,
+            agg_local_weighted_avg_train_acc
+        )
+
+        # Initialise the variables for loss
+        agg_local_train_loss = np.nan # mean average
+        agg_local_weighted_avg_train_loss = np.nan # weighted average
+        agg_local_train_loss_delta = np.nan # weighted average delta
+        agg_local_weighted_train_loss_delta = np.nan # weighted average delta ema smoothed
+
+        # Aggregate Loss
+        agg_local_train_loss = np.mean(list(training_losses.values()))
+        if self._last_agg_local_loss != None:
+            agg_local_weighted_avg_train_loss = np.average(list(training_losses.values()), weights=list(training_sample_size.values()))
+            agg_local_train_loss_delta = abs(agg_local_weighted_avg_train_loss - self._last_agg_local_loss[1])
+            agg_local_weighted_train_loss_delta = abs(agg_local_train_loss - self._last_agg_local_loss[0])
+
+        self._last_agg_local_loss = (
+            agg_local_train_loss,
+            agg_local_weighted_avg_train_loss
+        )
         
-        self.last_accuracy = (avg_train_acc, weighted_avg_train_acc)
-        self.last_loss = (avg_train_loss, weighted_avg_train_loss)
-
-        # calc ema
-        if (self.last_accuracy_ema is None or self.last_loss_ema is None) \
-            or (np.nan in self.last_accuracy_ema or np.nan in self.last_loss_ema):
-            self.last_accuracy_ema = self.last_accuracy
-            self.last_loss_ema = self.last_loss
+        # Calculate the Exponential Moving Average for Accuracy and Loss
+        # Check if either the variables storing the last smoothed values are None (happens during the first round)
+        # or if their values are np.nan (happens during the second round, 
+        # because the last values are initialised with the nan values of the last accuracy/loss values during the first round)
+        if (self._last_agg_local_accuracy_ema is None or self._last_agg_local_loss_ema is None) \
+            or (np.nan in self._last_agg_local_accuracy_ema or np.nan in self._last_agg_local_loss_ema):
+            self._last_agg_local_accuracy_ema = self._last_agg_local_accuracy
+            self._last_agg_local_loss_ema = self._last_agg_local_loss
         else:
-            self.last_accuracy_ema = (
-                FedZeroServer.ema(agg_local_train_acc_delta, self.last_accuracy_ema[0], self.ema_alpha),
-                FedZeroServer.ema(agg_local_weighted_train_acc_delta, self.last_accuracy_ema[1], self.ema_alpha)
+            self._last_agg_local_accuracy_ema = (
+                FedZeroServer.ema(agg_local_train_acc_delta, self._last_agg_local_accuracy_ema[0], FedZeroServer._ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_acc_delta, self._last_agg_local_accuracy_ema[1], FedZeroServer._ema_alpha)
             )
-            self.last_loss_ema = (
-                FedZeroServer.ema(agg_local_train_loss_delta, self.last_loss_ema[0], self.ema_alpha),
-                FedZeroServer.ema(agg_local_weighted_train_loss_delta, self.last_loss_ema[1], self.ema_alpha)
+            self._last_agg_local_loss_ema = (
+                FedZeroServer.ema(agg_local_train_loss_delta, self._last_agg_local_loss_ema[0], FedZeroServer._ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_loss_delta, self._last_agg_local_loss_ema[1], FedZeroServer._ema_alpha)
             )
 
         for client in self.client_load_api.get_clients():
@@ -284,16 +299,19 @@ class FedZeroServer(Server):
         ] = self.strategy.aggregate_fit(server_round, results, failures)
 
         parameters_aggregated, metrics_aggregated = aggregated_result
+        # Add Accuracy Metrics
         metrics_aggregated["local_train_acc"] = agg_local_train_acc
         metrics_aggregated["local_train_acc_delta"] = agg_local_train_acc_delta
-        metrics_aggregated["local_train_acc_delta_ema"] = self.last_accuracy_ema[0]
+        metrics_aggregated["local_train_acc_delta_ema"] = self._last_agg_local_accuracy_ema[0]
         metrics_aggregated["local_weighted_train_acc_delta"] = agg_local_weighted_train_acc_delta
-        metrics_aggregated["local_weighted_train_acc_delta_ema"] = self.last_accuracy_ema[1]
+        metrics_aggregated["local_weighted_train_acc_delta_ema"] = self._last_agg_local_accuracy_ema[1]
+        # Add Loss Metrics
         metrics_aggregated["local_train_loss"] = agg_local_train_loss
         metrics_aggregated["local_train_loss_delta"] = agg_local_train_loss_delta
-        metrics_aggregated["local_train_loss_delta_ema"] = self.last_loss_ema[0]
+        metrics_aggregated["local_train_loss_delta_ema"] = self._last_agg_local_loss_ema[0]
         metrics_aggregated["local_weighted_train_loss_delta"] = agg_local_weighted_train_loss_delta
-        metrics_aggregated["local_weighted_train_loss_delta_ema"] = self.last_loss_ema[1]
+        metrics_aggregated["local_weighted_train_loss_delta_ema"] = self._last_agg_local_loss_ema[1]
+
         return parameters_aggregated, metrics_aggregated, (results, failures), participation, now + round_duration
 
 
