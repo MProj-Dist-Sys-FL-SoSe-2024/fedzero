@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Set
+from typing import Any, List, Optional, Dict, Set
 
 import gurobipy as grb
 import numpy as np
 import pandas as pd
 
-from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS
+from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, CRITICAL_LEARNING_OPTIMISATION
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
@@ -24,7 +24,7 @@ class SelectionStrategy(ABC):
 
     @abstractmethod
     def select(
-        self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
+        self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
     ) -> Optional[pd.DataFrame]:
         """Selects the participating clients for a FL training round and decides on the duration.
 
@@ -56,7 +56,7 @@ class RandomSelectionStrategy(SelectionStrategy):
         return f"random{'_fc' if self.use_forecasts else ''}"
 
     def select(
-        self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
+        self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
     ) -> Optional[pd.DataFrame]:
         """Selects <CLIENTS_PER_ROUND> randomly if they have energy and capacity"""
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
@@ -94,7 +94,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
 
-    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         TRANSITION_PERIOD_H = 12
         wallah = self.cycle_participation_mean
         if self.cycle_start is None:
@@ -124,7 +124,13 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
             if len(filtered_clients) < self.clients_per_round:
                 continue
-            solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
+            if CRITICAL_LEARNING_OPTIMISATION \
+                and (metrics.get("local_weighted_train_loss_delta_ema") is not None) \
+                and metrics.get("local_weighted_train_loss_delta_ema") < 0.1:
+                solution = None
+                # TODO generate solution dataframe!!!
+            else:
+                solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
             if solution is not None:
                 return solution
         return None  # if no solution found before max round durationself.round_prefer_duration
@@ -209,7 +215,7 @@ class OortSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"oort{'_fc' if self.use_forecasts else ''}"
 
-    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         # register clients
         if len(self.oort_selector.totalArms) == 0:
             for client in client_load_api.get_clients():

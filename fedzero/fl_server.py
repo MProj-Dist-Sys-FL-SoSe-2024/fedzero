@@ -17,7 +17,8 @@ import json
 import time
 from datetime import datetime, timedelta
 from logging import DEBUG, INFO
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from copy import deepcopy
 
 import numpy as np
 from flwr.common import Parameters, Scalar
@@ -68,6 +69,7 @@ class FedZeroServer(Server):
         self._last_agg_local_loss_ema = None
         self._last_agg_local_accuracy = None
         self._last_agg_local_accuracy_ema = None
+        self._last_metrics = None
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
 
     _ema_window = 5
@@ -107,11 +109,12 @@ class FedZeroServer(Server):
             # Train model and replace previous global model
             while True:
                 start_time_fit = time.time()
-                res_fit = self.fit_round_ra(server_round=current_round, now=now, timeout=timeout)
+                res_fit = self.fit_round_ra(metrics=self._last_metrics, server_round=current_round, now=now, timeout=timeout)
                 tb_props = dict(global_step=current_round, walltime=now.timestamp())
                 if res_fit:
                     print(f'Select & fit time: {time.time() - start_time_fit:.1f} s')
                     parameters, metrics, _, participation, new_now = res_fit  # fit_metrics_aggregated
+                    self._last_metrics = deepcopy(metrics)
                     duration = new_now - now
                     if parameters:
                         self.parameters = parameters
@@ -191,10 +194,10 @@ class FedZeroServer(Server):
         log(INFO, "FL finished.")
         return history
 
-    def fit_round_ra(self, server_round: int, now: datetime, timeout: Optional[float]) -> Optional[
+    def fit_round_ra(self, metrics: dict[str, Any], server_round: int, now: datetime, timeout: Optional[float]) -> Optional[
         Tuple[Optional[Parameters], Dict, FitResultsAndFailures, Dict[str, int], datetime]]:
         """Perform a single round of federated averaging."""
-        selection = self.selection_strategy.select(self.power_domain_api, self.client_load_api, round_number=server_round, now=now)
+        selection = self.selection_strategy.select(metrics, self.power_domain_api, self.client_load_api, round_number=server_round, now=now)
         if selection is None:
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
