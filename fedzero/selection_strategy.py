@@ -125,8 +125,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             if len(filtered_clients) < self.clients_per_round:
                 continue
             if CRITICAL_LEARNING_OPTIMISATION \
-                and (metrics.get("local_weighted_train_loss_delta_ema") is not None) \
-                and metrics.get("local_weighted_train_loss_delta_ema") < 0.1:
+                and ((metrics.get("local_weighted_train_loss_delta_ema") is not None) \
+                or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
                 solution = None
                 # TODO generate solution dataframe!!!
             else:
