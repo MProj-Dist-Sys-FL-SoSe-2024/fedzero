@@ -4,7 +4,7 @@ NIID_DATA_SEED = 42  # controls how the data is split across clients
 SAVE_TRAINED_MODELS = False
 GUROBI_ENV = gurobipy.Env(params={"OutputFlag": 0})
 
-CRITICAL_LEARNING_OPTIMISATION = True
+CRITICAL_LEARNING_OPTIMISATION = False
 
 TIMESTEP_IN_MIN = 1  # minutes
 MAX_ROUND_IN_MIN = 60  # minutes
@@ -22,8 +22,8 @@ SOLAR_SIZE = 800  # W
 
 # Flower
 RAY_CLIENT_RESOURCES = {
-    "num_cpus": 3,  # CPU threads assigned to each client
-    "num_gpus": 1 / 3
+    "num_cpus": 1,  # CPU threads assigned to each client
+    # "num_gpus": 1 / 3
 }
 RAY_INIT_ARGS = {
     # "num_cpus": 8,  # Number of physically accessible CPUs
