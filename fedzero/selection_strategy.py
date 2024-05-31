@@ -125,12 +125,21 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             if len(filtered_clients) < self.clients_per_round:
                 continue
             if CRITICAL_LEARNING_OPTIMISATION \
-                and ((metrics.get("local_weighted_train_loss_delta_ema") is not None) \
+                and ((metrics is None)
+                or (metrics.get("local_weighted_train_loss_delta_ema") is None) \
                 or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
                 solution = None
                 # TODO generate solution dataframe!!!
+                # Clients | pd.DateOffset for one hour steps | ....
+                # Client  | number of batches
+                # ....
+                # For round duration d you need d columns of pd.DateOffset
+
+                # !!!change _optimal_selection to remove client limit
+                # _green_selection ?
             else:
                 solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
+                print(solution)
             if solution is not None:
                 return solution
         return None  # if no solution found before max round durationself.round_prefer_duration
@@ -189,6 +198,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             model.addGenConstrIndicator(b[client], True, max_batches >= _sum(m_alloc[client, t] for t in range(d)))
 
         model.addConstr(_sum(b[c] for c in clients) == self.clients_per_round)
+        # maybe: _sum(b[c] for c in clients) == number of clients allowed?
 
         model.ModelSense = grb.GRB.MAXIMIZE
         model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
