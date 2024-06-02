@@ -6,7 +6,8 @@ import gurobipy as grb
 import numpy as np
 import pandas as pd
 
-from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, CRITICAL_LEARNING_OPTIMISATION
+from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, \
+    CRITICAL_LEARNING_OPTIMISATION
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
@@ -24,7 +25,8 @@ class SelectionStrategy(ABC):
 
     @abstractmethod
     def select(
-        self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
+            self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+            round_number: int, now: datetime
     ) -> Optional[pd.DataFrame]:
         """Selects the participating clients for a FL training round and decides on the duration.
 
@@ -56,12 +58,14 @@ class RandomSelectionStrategy(SelectionStrategy):
         return f"random{'_fc' if self.use_forecasts else ''}"
 
     def select(
-        self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
+            self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+            round_number: int, now: datetime
     ) -> Optional[pd.DataFrame]:
         """Selects <CLIENTS_PER_ROUND> randomly if they have energy and capacity"""
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
         if self.use_forecasts:
-            clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN), self.min_epochs)
+            clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now,
+                                                               int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN), self.min_epochs)
         if len(clients) < self.clients_per_round:
             return None
 
@@ -94,7 +98,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
 
-    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+               round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         TRANSITION_PERIOD_H = 12
         wallah = self.cycle_participation_mean
         if self.cycle_start is None:
@@ -108,9 +113,11 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             print("############################################################")
         elif self.cycle_start + timedelta(hours=24 - TRANSITION_PERIOD_H) <= now:
             current_mean = np.mean([c.participated_rounds for c in self.cycle_active_clients])
-            factor = (now - (self.cycle_start + timedelta(hours=24 - TRANSITION_PERIOD_H))).seconds / 3600 / TRANSITION_PERIOD_H
+            factor = (now - (self.cycle_start + timedelta(
+                hours=24 - TRANSITION_PERIOD_H))).seconds / 3600 / TRANSITION_PERIOD_H
             wallah = self.cycle_participation_mean + (current_mean - self.cycle_participation_mean) * factor
-            print(f"Cycle mean: {self.cycle_participation_mean:.2f}, Current mean: {current_mean:.2f} factor: {factor}, result: {wallah} ###")
+            print(
+                f"Cycle mean: {self.cycle_participation_mean:.2f}, Current mean: {current_mean:.2f} factor: {factor}, result: {wallah} ###")
 
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
         self.cycle_active_clients = self.cycle_active_clients.union(clients)
@@ -121,14 +128,22 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
         utility = self.utility_judge.utility()
         for d in range(1, int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN) + 1):
-            filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
+            filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now,
+                                                                        d, self.min_epochs)
             if len(filtered_clients) < self.clients_per_round:
                 continue
             if CRITICAL_LEARNING_OPTIMISATION \
-                and ((metrics is None)
-                or (metrics.get("local_weighted_train_loss_delta_ema") is None) \
-                or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
-                solution = None
+                    and ((metrics is None)
+                         or (metrics.get("local_weighted_train_loss_delta_ema") is None) \
+                         or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
+                solution = self._optimal_selection(power_domain_api, client_load_api, clients, utility, d=d,
+                                                   now=now)
+                print("Modified:\n" + solution)
+
+                # print solution of original code
+                solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d,
+                                                    now=now)
+                print("Original:\n" + solution)
                 # TODO generate solution dataframe!!!
                 # Clients | pd.DateOffset for one hour steps | ....
                 # Client  | number of batches
@@ -138,7 +153,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 # !!!change _optimal_selection to remove client limit
                 # _green_selection ?
             else:
-                solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
+                solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d,
+                                                   now=now)
                 print(solution)
             if solution is not None:
                 return solution
@@ -150,8 +166,10 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             return
 
         print("--- FedZero Exclusion ------------------------")
-        utility_threshold = np.quantile([client.statistical_utility() for client in participants], self.exclusion_factor)
-        print(f"| Excluding {int(len(participants) * self.exclusion_factor)} clients below statistical utility {utility_threshold:.12}.")
+        utility_threshold = np.quantile([client.statistical_utility() for client in participants],
+                                        self.exclusion_factor)
+        print(
+            f"| Excluding {int(len(participants) * self.exclusion_factor)} clients below statistical utility {utility_threshold:.12}.")
         for client in participants:
             if client.statistical_utility() <= utility_threshold:
                 self.excluded_clients.append(client)
@@ -183,13 +201,16 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                            now: datetime):
         model = grb.Model(name="MIP Model", env=GUROBI_ENV)
 
-        m_alloc = {(c, t): model.addVar(lb=0, ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t), duration_in_timesteps=1, client_name=c.name).iloc[0]) for c in clients for t in range(d)}
+        m_alloc = {(c, t): model.addVar(lb=0, ub=
+        client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t), duration_in_timesteps=1,
+                                 client_name=c.name).iloc[0]) for c in clients for t in range(d)}
         b = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
 
         for zone in set(client.zone for client in clients):
             clients_in_zone = [client for client in clients if client.zone == zone]
             for i, value in enumerate(power_domain_api.forecast(now, duration_in_timesteps=d, zone=zone)):
-                model.addConstr(_sum(m_alloc[client, i] * client.energy_per_batch for client in clients_in_zone) <= value)
+                model.addConstr(
+                    _sum(m_alloc[client, i] * client.energy_per_batch for client in clients_in_zone) <= value)
 
         for client in clients:
             min_batches = client.batches_per_epoch * self.min_epochs
@@ -204,15 +225,25 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
         model.optimize()
 
-        if model.Status == grb.GRB.INFEASIBLE:
+        if model.Status == grb.GRB.INFEASIBLE \
+                and CRITICAL_LEARNING_OPTIMISATION is False:    # continue even if model is infeasible
             return None
 
-        df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
+        try:
+            # try to get the solution from the model
+            df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
+        except Exception:
+            # the line above will not execute if the model is infeasible and therefore no solution is found
+            # in this case, we use a DataFrame with zeros
+            df = pd.DataFrame([0 for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
+
         df = df.unstack(level=1)
+        # TODO: crashing here
         selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
         df = df[np.isclose(selected_clients, 1)]
 
-        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}T")
+        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d,
+                                   freq=f"{TIMESTEP_IN_MIN}T")
         return df.sort_index()
 
 
@@ -225,12 +256,14 @@ class OortSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"oort{'_fc' if self.use_forecasts else ''}"
 
-    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, metrics: dict[str, Any], power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+               round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         # register clients
         if len(self.oort_selector.totalArms) == 0:
             for client in client_load_api.get_clients():
                 timesteps_per_epoch = client.batches_per_epoch / client.batches_per_timestep
-                self.oort_selector.register_client(clientId=client.name, size=client.num_samples, duration=timesteps_per_epoch)
+                self.oort_selector.register_client(clientId=client.name, size=client.num_samples,
+                                                   duration=timesteps_per_epoch)
 
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
         if len(clients) < self.clients_per_round:
@@ -249,7 +282,8 @@ class OortSelectionStrategy(SelectionStrategy):
                 )
             else:
                 expected_duration_based_on_capacity = required_batches / client_load_api.actual(now, client.name)
-                expected_duration_based_on_energy = required_batches * client.energy_per_batch / power_domain_api.actual(now, client.zone)
+                expected_duration_based_on_energy = required_batches * client.energy_per_batch / power_domain_api.actual(
+                    now, client.zone)
             expected_duration = max(expected_duration_based_on_capacity, expected_duration_based_on_energy)
 
             if client.participated_in_last_round(round_number):
@@ -259,7 +293,8 @@ class OortSelectionStrategy(SelectionStrategy):
                 self.oort_selector.update_duration(clientId=client.name, duration=expected_duration)
 
         selected_client_names = self.oort_selector.select_participant(self.clients_per_round,
-                                                                      feasible_clients=[client.name for client in clients])
+                                                                      feasible_clients=[client.name for client in
+                                                                                        clients])
         index = [c for c in client_load_api.get_clients() if c.name in selected_client_names]
         return pd.DataFrame(1, index=index, columns=[now + timedelta(minutes=TIMESTEP_IN_MIN)])
 
@@ -277,7 +312,8 @@ def _filterby_current_capacity_and_energy(power_domain_api: PowerDomainApi,
                                           client_load_api: ClientLoadApi,
                                           now: datetime) -> List[Client]:
     zones_with_energy = [zone for zone in power_domain_api.zones if power_domain_api.actual(now, zone) > 0.0]
-    clients = [client for client in client_load_api.get_clients(zones_with_energy) if client_load_api.actual(now, client.name) > 0.0]
+    clients = [client for client in client_load_api.get_clients(zones_with_energy) if
+               client_load_api.actual(now, client.name) > 0.0]
     print(f"There are {len(clients)} clients available across {len(zones_with_energy)} power domains.")
     return clients
 
@@ -291,7 +327,8 @@ def _filterby_forecasted_capacity_and_energy(power_domain_api: PowerDomainApi,
     filtered_clients: List[Client] = []
     for client in clients:
         possible_batches = client_load_api.forecast(now, duration_in_timesteps=d, client_name=client.name)
-        ree_powered_batches = power_domain_api.forecast(now, duration_in_timesteps=d, zone=client.zone) / client.energy_per_batch
+        ree_powered_batches = power_domain_api.forecast(now, duration_in_timesteps=d,
+                                                        zone=client.zone) / client.energy_per_batch
         # Significantly faster than pandas
         total_max_batches = np.minimum(possible_batches.values, ree_powered_batches.values).sum()
         if total_max_batches >= client.batches_per_epoch * min_epochs:
