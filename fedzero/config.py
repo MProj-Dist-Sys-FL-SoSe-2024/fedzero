@@ -4,7 +4,8 @@ NIID_DATA_SEED = 42  # controls how the data is split across clients
 SAVE_TRAINED_MODELS = False
 GUROBI_ENV = gurobipy.Env(params={"OutputFlag": 0})
 
-CRITICAL_LEARNING_OPTIMISATION = False
+CRITICAL_LEARNING_OPTIMISATION = True
+CRITICAL_LEARNING_THRESHOLD = 0.1
 
 TIMESTEP_IN_MIN = 1  # minutes
 MAX_ROUND_IN_MIN = 60  # minutes
