@@ -220,7 +220,7 @@ class FedZeroServer(Server):
         #             or metrics.get("local_weighted_train_loss_delta_ema") > CRITICAL_LEARNING_THRESHOLD)):
         if (CRITICAL_LEARNING_OPTIMISATION
                 and (self._last_agg_local_loss_ema is None
-                     or self._last_agg_local_loss_ema > CRITICAL_LEARNING_THRESHOLD)):
+                     or self._last_agg_local_loss_ema[0] > CRITICAL_LEARNING_THRESHOLD)):
             # allow brown clients to participate
             selection = self.selection_strategy.select(metrics, self.power_domain_api, self.client_load_api,
                                                        round_number=server_round, now=now, allow_brown_clients=True)
