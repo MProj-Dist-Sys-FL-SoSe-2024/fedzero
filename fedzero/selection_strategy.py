@@ -134,16 +134,10 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 continue
             if CRITICAL_LEARNING_OPTIMISATION \
                     and ((metrics is None)
-                         or (metrics.get("local_weighted_train_loss_delta_ema") is None) \
+                         or (metrics.get("local_weighted_train_loss_delta_ema") is None)
                          or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
-                solution = self._optimal_selection(power_domain_api, client_load_api, clients, utility, d=d,
-                                                   now=now)
-                print("Modified:\n" + solution)
-
-                # print solution of original code
                 solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d,
-                                                    now=now)
-                print("Original:\n" + solution)
+                                                   now=now)
                 # TODO generate solution dataframe!!!
                 # Clients | pd.DateOffset for one hour steps | ....
                 # Client  | number of batches
@@ -225,20 +219,12 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
         model.optimize()
 
-        if model.Status == grb.GRB.INFEASIBLE \
-                and CRITICAL_LEARNING_OPTIMISATION is False:    # continue even if model is infeasible
+        if model.Status == grb.GRB.INFEASIBLE:
             return None
 
-        try:
-            # try to get the solution from the model
-            df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
-        except Exception:
-            # the line above will not execute if the model is infeasible and therefore no solution is found
-            # in this case, we use a DataFrame with zeros
-            df = pd.DataFrame([0 for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
+        df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
 
         df = df.unstack(level=1)
-        # TODO: crashing here
         selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
         df = df[np.isclose(selected_clients, 1)]
 
