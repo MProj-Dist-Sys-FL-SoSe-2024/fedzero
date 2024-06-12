@@ -211,16 +211,16 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         # dictionary that stores gurobi binary decision variables for each client
         b = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
 
-        if not allow_brown_clients:
-            # defining the decision variables for a Gurobi optimization model, which will be used to allocate resources
-            # to clients over time in an optimal way
-            m_alloc = {(c, t): model.addVar(
-                lb=0,  # lower bound
-                ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t),  # upper bound
-                                            duration_in_timesteps=1,
-                                            client_name=c.name)
-                .iloc[0]) for c in clients for t in range(d)}
+        # defining the decision variables for a Gurobi optimization model, which will be used to allocate resources
+        # to clients over time in an optimal way
+        m_alloc = {(c, t): model.addVar(
+            lb=0,  # lower bound
+            ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t),  # upper bound
+                                        duration_in_timesteps=1,
+                                        client_name=c.name)
+            .iloc[0]) for c in clients for t in range(d)}
 
+        if not allow_brown_clients:
             # add constraints to the model that ensures that the total energy used by all clients in a particular zone
             # at each time step does not exceed the available energy in that zone
             for zone in set(client.zone for client in clients):     # iterate over all zones
@@ -238,12 +238,6 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
             model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
         else:
-            # defining the decision variables for a Gurobi optimization model, which will be used to allocate resources
-            # to clients over time in an optimal way
-            m_alloc = {(c, t): model.addVar(
-                lb=0,
-                ub=float('inf')) for c in clients for t in range(d)}
-
             # allow more clients to be selected than the number of clients per round
             model.addConstr(_sum(b[c] for c in clients) >= self.clients_per_round)
 
