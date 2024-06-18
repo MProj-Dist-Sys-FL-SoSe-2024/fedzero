@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, MIN_LOCAL_EPOCHS, MAX_LOCAL_EPOCHS, \
-    CLIENTS_PER_ROUND, GUROBI_ENV
+    CLIENTS_PER_ROUND, GUROBI_ENV, CRITICAL_LEARNING_OPTIMISATION
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 
 EPSILON = 0.0001
@@ -19,27 +19,41 @@ def execute_round(power_domain_api: PowerDomainApi,
                   min_epochs: float,
                   max_epochs: float) -> Tuple[Dict[str, int], timedelta]:
     """Simulates the execution of a training round."""
+    # Extend the selection dataframe to cover the entire duration of the round
     selection = _extend_selection_df(selection)
+
+    # Simulate the execution of a training round within each unique zone
     time_iterator = [_execute_power_domain_round(power_domain_api, client_load_api, zone, p_selection, max_epochs)
                      for zone, p_selection
                      in selection.groupby(lambda c: c.zone)]
 
     # We progress in all energy domains until <CLIENTS_PER_ROUND> clients have reached `min_epochs`
-    participation = {}
+    participation = {}      # Dict for storing participation of each client
+    # iterate over results of all zones
     for p_timestep_results in zip(*time_iterator):
         n_clients_above_min_epochs = 0
+        # Aggregate the participation of clients
         for p_participation, now in p_timestep_results:
             for client, part in p_participation.items():
                 participation[client] = part
+                # Check if the client has reached the minimum number of epochs and increment the counter
                 if participation[client] >= client.batches_per_epoch * min_epochs:
                     n_clients_above_min_epochs += 1
-        if n_clients_above_min_epochs >= CLIENTS_PER_ROUND:
+
+        # If the number of clients that have reached the minimum number of epochs is at least CLIENTS_PER_ROUND,
+        # break the loop, unless CRITICAL_LEARNING_OPTIMISATION is enabled
+        if (n_clients_above_min_epochs >= CLIENTS_PER_ROUND
+                and not CRITICAL_LEARNING_OPTIMISATION):
             break
 
+    # Record the usage of each client
     for client, client_participation in participation.items():
         client.record_usage(client_participation)
+
+    # Calculate the duration of the round
     round_duration = now - selection.columns[0]
 
+    # Print the number of batches computed by each client
     computed_batches = {}
     for c, p in participation.items():
         minimum = c.batches_per_epoch * MIN_LOCAL_EPOCHS
@@ -49,6 +63,7 @@ def execute_round(power_domain_api: PowerDomainApi,
         else:
             print(f"{c.name} computes {math.floor(p)} (BELOW {minimum})")
 
+    # Return the number of batches computed by each client and the duration of the round
     return computed_batches, round_duration
 
 
