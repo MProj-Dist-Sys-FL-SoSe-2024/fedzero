@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Dict, Set
+import itertools
 
 import gurobipy as grb
 import numpy as np
 import pandas as pd
 
-from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, CRITICAL_LEARNING_OPTIMISATION
+from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, CRITICAL_LEARNING_OPTIMISATION, CRITICAL_LEARNING_THRESHOLD
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
@@ -124,22 +125,21 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
             if len(filtered_clients) < self.clients_per_round:
                 continue
+
+            if metrics is not None:
+                local_weighted_train_loss_delta_ema = metrics.get("local_weighted_train_loss_delta_ema")
             if CRITICAL_LEARNING_OPTIMISATION \
                 and ((metrics is None)
-                or (metrics.get("local_weighted_train_loss_delta_ema") is None) \
-                or metrics.get("local_weighted_train_loss_delta_ema") > 0.1):
-                solution = None
-                # TODO generate solution dataframe!!!
-                # Clients | pd.DateOffset for one hour steps | ....
-                # Client  | number of batches
-                # ....
-                # For round duration d you need d columns of pd.DateOffset
-
-                # !!!change _optimal_selection to remove client limit
-                # _green_selection ?
+                or (local_weighted_train_loss_delta_ema == np.nan)
+                or (pd.isna(local_weighted_train_loss_delta_ema))
+                or (local_weighted_train_loss_delta_ema is None)
+                or (local_weighted_train_loss_delta_ema > CRITICAL_LEARNING_THRESHOLD)):
+                print("CRITICAL LEARNING!!!")
+                solution = self._maximize_clients_selection(
+                    power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now
+                )
             else:
                 solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
-                print(solution)
             if solution is not None:
                 return solution
         return None  # if no solution found before max round durationself.round_prefer_duration
@@ -173,6 +173,62 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 print("")
         print(f"| Excluded clients after remove: {len(self.excluded_clients)}")
         print("----------------------------------------------")
+
+    def _maximize_clients_selection(self,
+                           power_domain_api: PowerDomainApi,
+                           client_load_api: ClientLoadApi,
+                           clients: List[Client],
+                           utility: Dict[Client, float],
+                           d: int,
+                           now: datetime):
+        model = grb.Model(name="MIP Model", env=GUROBI_ENV)
+
+        max_energy_per_batch = max([c.energy_per_batch for c in clients])
+
+        m_alloc = {(c, t): model.addVar(lb=0, ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t), duration_in_timesteps=1, client_name=c.name).iloc[0]) for c in clients for t in range(d)}
+        b = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
+        m_alloc_b = {(c, t): model.addVar(lb=0, vtype=grb.GRB.INTEGER) for c in clients for t in range(d)}
+
+        for c, t in itertools.product([c for c in clients], [t for t in range(d)]):
+            model.addConstr(b[c] * m_alloc[c, t] == m_alloc_b[c, t])
+
+        for zone in set(client.zone for client in clients):
+            clients_in_zone = [client for client in clients if client.zone == zone]
+            for i, value in enumerate(power_domain_api.forecast(now, duration_in_timesteps=d, zone=zone)):
+                model.addConstr(_sum(m_alloc[client, i] * client.energy_per_batch for client in clients_in_zone) <= value)
+
+        for client in clients:
+            min_batches = client.batches_per_epoch * self.min_epochs * 1.20
+            max_batches = client.batches_per_epoch * self.max_epochs
+            model.addGenConstrIndicator(b[client], True, min_batches <= _sum(m_alloc[client, t] for t in range(d)))
+            model.addGenConstrIndicator(b[client], True, max_batches >= _sum(m_alloc[client, t] for t in range(d)))
+
+        model.addConstr(_sum(b[c] for c in clients) >= self.clients_per_round)
+        # maybe: _sum(b[c] for c in clients) == number of clients allowed?
+
+        model.ModelSense = grb.GRB.MAXIMIZE
+        model.setObjective(
+            _sum(b[c] for c in clients),
+            
+        ) # (1 - (c.energy_per_batch / max_energy_per_batch))
+        # model.setObjectiveN(
+        #     _sum(m_alloc_b[c, t] for c in clients for t in range(d)),
+        #     index = 1,
+        #     priority = 10,
+        #     name = "Maximize Batches by Utility"
+        # )
+        model.optimize()
+
+        if model.Status == grb.GRB.INFEASIBLE:
+            return None
+
+        df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
+        df = df.unstack(level=1)
+        selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
+        df = df[np.isclose(selected_clients, 1)]
+
+        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}T")
+        return df.sort_index()
 
     def _optimal_selection(self,
                            power_domain_api: PowerDomainApi,
