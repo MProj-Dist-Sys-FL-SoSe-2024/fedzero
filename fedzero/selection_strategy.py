@@ -206,9 +206,9 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         model.addConstr(_sum(b[c] for c in clients) >= self.clients_per_round)
         # maybe: _sum(b[c] for c in clients) == number of clients allowed?
 
-        model.ModelSense = grb.GRB.MAXIMIZE
+        model.ModelSense = -1
         model.setObjective(
-            _sum(b[c] for c in clients),
+            _sum(b[c].X for c in clients),
             
         ) # (1 - (c.energy_per_batch / max_energy_per_batch))
         # model.setObjectiveN(
@@ -225,6 +225,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
         df = df.unstack(level=1)
         selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
+        print(selected_clients)
         df = df[np.isclose(selected_clients, 1)]
 
         df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}T")
@@ -237,6 +238,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                            utility: Dict[Client, float],
                            d: int,
                            now: datetime):
+        raise RuntimeError()
         model = grb.Model(name="MIP Model", env=GUROBI_ENV)
 
         m_alloc = {(c, t): model.addVar(lb=0, ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t), duration_in_timesteps=1, client_name=c.name).iloc[0]) for c in clients for t in range(d)}
