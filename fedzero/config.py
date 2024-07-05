@@ -5,7 +5,8 @@ SAVE_TRAINED_MODELS = False
 GUROBI_ENV = gurobipy.Env(params={"OutputFlag": 0})
 
 CRITICAL_LEARNING_OPTIMISATION = True
-CRITICAL_LEARNING_THRESHOLD = 0.1
+CRITICAL_LEARNING_THRESHOLD = 0.0
+CARBON_BUDGET_PERCENTAGE = 0.5      # 50% of dirty energy is allowed during the critical learning phase
 
 TIMESTEP_IN_MIN = 1  # minutes
 MAX_ROUND_IN_MIN = 60  # minutes

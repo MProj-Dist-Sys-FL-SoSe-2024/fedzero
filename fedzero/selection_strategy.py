@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS, \
-    CRITICAL_LEARNING_OPTIMISATION, CRITICAL_LEARNING_THRESHOLD
+    CRITICAL_LEARNING_OPTIMISATION, CRITICAL_LEARNING_THRESHOLD, CARBON_BUDGET_PERCENTAGE
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
@@ -220,10 +220,16 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                                         client_name=c.name)
             .iloc[0]) for c in clients for t in range(d)}
 
+        # objective: maximize the utility of selected clients
+        model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
+
         if not allow_brown_clients:
+            # only allow a certain number of clients to be selected
+            model.addConstr(_sum(b[c] for c in clients) == self.clients_per_round)
+
             # add constraints to the model that ensures that the total energy used by all clients in a particular zone
             # at each time step does not exceed the available energy in that zone
-            for zone in set(client.zone for client in clients):     # iterate over all zones
+            for zone in set(client.zone for client in clients):  # iterate over all zones
                 # create list of clients that are in the current zone
                 clients_in_zone = [client for client in clients if client.zone == zone]
                 # iterate over the forecasted available energy in the current zone at each time step
@@ -232,17 +238,33 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                     # the forecasted available energy in the zone at that time step
                     model.addConstr(
                         _sum(m_alloc[client, i] * client.energy_per_batch for client in clients_in_zone) <= value)
-
-            # only allow a certain number of clients to be selected
-            model.addConstr(_sum(b[c] for c in clients) == self.clients_per_round)
-
-            model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
         else:
+            # adding print statements to keep track of the clients selected due to green and dirty energy
+            green_energy_clients = set()
+            dirty_energy_clients = set()
+
             # allow more clients to be selected than the number of clients per round
             model.addConstr(_sum(b[c] for c in clients) >= self.clients_per_round)
 
-            # still use the same objective
-            model.setObjective(_sum(b[c] * utility[c] * m_alloc[c, t] for c in clients for t in range(d)))
+            # calculate total green energy available and additional dirty energy allowed
+            total_green_energy = sum(power_domain_api.forecast(now, duration_in_timesteps=d, zone=zone).sum()
+                                     for zone in set(client.zone for client in clients))
+            additional_dirty_energy = total_green_energy * CARBON_BUDGET_PERCENTAGE
+
+            # constrain the total additional dirty energy usage
+            model.addConstr(
+                _sum(m_alloc[client, t] * client.energy_per_batch for client in clients for t in range(d)) <=
+                total_green_energy + additional_dirty_energy)
+
+            # add print statements to differentiate between green and dirty energy clients
+            def add_selection_logging():
+                for c in clients:
+                    if b[c].X > 0.5:
+                        if sum(m_alloc[c, t].X * c.energy_per_batch for t in range(d)) <= total_green_energy:
+                            green_energy_clients.add(c)
+                        else:
+                            dirty_energy_clients.add(c)
+
 
         # add constraints to the model to ensure that the number of batches processed by each client is within a
         # specified range
@@ -257,6 +279,23 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
         if model.Status == grb.GRB.INFEASIBLE:
             return None
+
+        if allow_brown_clients:
+            add_selection_logging()
+
+            # Logging the selected clients
+            print("* * * * * * * * * * * * * * * * * * * * * * * * *")
+            print("Selected clients using green energy:")
+            print("* * * * * * * * * * * * * * * * * * * * * * * * *")
+            for c in green_energy_clients:
+                print(f"- Client {c.name} in zone {c.zone} with energy usage of {c.energy_per_batch}")
+
+            print("* * * * * * * * * * * * * * * * * * * * * * * * *")
+            print("Selected clients using additional dirty energy:")
+            print("* * * * * * * * * * * * * * * * * * * * * * * * *")
+            for c in dirty_energy_clients:
+                print(f"- Client {c.name} in zone {c.zone} with energy usage of {c.energy_per_batch}")
+            print("* * * * * * * * * * * * * * * * * * * * * * * * *")
 
         df = pd.DataFrame([var.X for var in m_alloc.values()], index=pd.MultiIndex.from_tuples(m_alloc.keys()))
 
