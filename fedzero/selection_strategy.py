@@ -128,12 +128,15 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
             if solution is None:
                 continue
+            # Calc Energy Series
             batches = solution.sum(axis=1)
             energy = pd.Series()
             for index, item in batches.items():
                 index: Client
                 energy[index] = item * index.energy_per_batch
+            # Sum Energy
             limit = energy.sum()
+            # Define upper energy limit and lower client limit
             limit = int(limit * BROWN_CLIENTS_PERCENTAGE)
             min_brown_clients = max(1, self.clients_per_round * BROWN_CLIENTS_PERCENTAGE)
             brown_clients = [_client for _client in client_load_api.get_clients() if _client not in filtered_clients]
@@ -141,7 +144,19 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 client.is_brown = True
             if BROWN_CLIENTS_ALLOWANCE:
                 brown_solution = self._brown_selection(client_load_api, brown_clients, utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
+                # Calc Brown Energy Series
+                brown_batches = brown_solution.sum(axis=1)
+                brown_energy = pd.Series()
+                for index, item in brown_batches.items():
+                    index: Client
+                    brown_energy[index] = item * index.energy_per_batch
+                # Sum Brown Energy
+                brown_energy_sum = brown_energy.sum()
+                print(brown_energy_sum, limit)
+                assert int(brown_energy_sum) <= limit * 1.01
                 solution = pd.concat([solution, brown_solution])
+            print(solution.sum(axis=1))
+
             if solution is not None:
                 return solution
         return None  # if no solution found before max round durationself.round_prefer_duration

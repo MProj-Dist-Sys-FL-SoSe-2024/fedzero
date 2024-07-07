@@ -42,12 +42,13 @@ def execute_round(power_domain_api: PowerDomainApi,
 
     computed_batches = {}
     for c, p in participation.items():
+        c: Client
         minimum = c.batches_per_epoch * MIN_LOCAL_EPOCHS
         if math.floor(p) >= minimum:
-            print(f"{c.name} computes {math.floor(p)} (above {minimum})")
+            print(f"{c.name} - brown {c.is_brown} computes {math.floor(p)} (above {minimum})")
             computed_batches[c.name] = math.floor(p)
         else:
-            print(f"{c.name} computes {math.floor(p)} (BELOW {minimum})")
+            print(f"{c.name} - brown {c.is_brown} computes {math.floor(p)} (BELOW {minimum})")
 
     return computed_batches, round_duration
 
@@ -91,7 +92,10 @@ def _execute_power_domain_timestep(clients: List[Client],
     """Simulates the execution of a training round for one timestep within a power domain."""
     if len(clients) == 1:
         c = clients[0]
-        participation[c] += min(available_energy / c.energy_per_batch, max_batches[c])
+        if c.is_brown:
+            participation[c] += max_batches[c]
+        else:
+            participation[c] += min(available_energy / c.energy_per_batch, max_batches[c])
     else:
         # First attribute energy to clients that haven't reached MIN_LOCAL_EPOCHS
         participation1, remaining_energy = _attribute_power(MIN_LOCAL_EPOCHS, participation, available_energy,
