@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from time import sleep
 from typing import Dict, Optional
+import traceback
 
 import click
 import flwr
@@ -13,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from fedzero.config import NUM_CLIENTS, BATCH_SIZE, CLIENTS_PER_ROUND, MIN_LOCAL_EPOCHS, MAX_LOCAL_EPOCHS, \
     MAX_ROUNDS, RAY_CLIENT_RESOURCES, RAY_INIT_ARGS, SAVE_TRAINED_MODELS
+from fedzero import config
 from fedzero.datasets import get_dataloaders
 from fedzero.fl_client import flwr_get_parameters, flwr_set_parameters, test, FedZeroClient, FedZeroClientMock
 from fedzero.fl_server import FedZeroServer
@@ -200,13 +202,14 @@ def simulate_fl_training(experiment: Experiment, device: torch.device, mock: boo
 @click.option('--seed', type=int, default=None)
 @click.option('--runs', type=int, default=1)
 @click.option('--iid', is_flag=True, default=False)
+@click.option('--cpu', is_flag=True, default=False)
 def main(scenario: str, dataset: str, approach: str, overselect: float, forecast_error: str,
-         imbalanced_scenario: bool, mock: bool, seed: Optional[int], runs: Optional[int], iid: Optional[bool]):
-    for _ in range(runs):
+         imbalanced_scenario: bool, mock: bool, seed: Optional[int], runs: Optional[int], iid: Optional[bool], cpu: Optional[bool]):
+    for _ in range(0, runs):
         assert overselect >= 1
         clients_per_round = int(CLIENTS_PER_ROUND * overselect)
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:0" if (torch.cuda.is_available() and not cpu) else "cpu")
         print(f"USING DEVICE: {device}")
 
         net_arch, net_arch_size_factor, optimizer, opt_args, proximal_mu, beta = get_model_and_hyperparameters(dataset, iid=iid)
@@ -266,6 +269,7 @@ def main(scenario: str, dataset: str, approach: str, overselect: float, forecast
             print(f"Finished Experiment {str(i)}")
         except:
             print("error, sleeping a few seconds!")
+            traceback.print_exc()
             sleep(5)
         
 

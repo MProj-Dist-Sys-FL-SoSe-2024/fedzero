@@ -20,6 +20,7 @@ from logging import DEBUG, INFO
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from flwr.common import Parameters, Scalar
 from flwr.common.logger import log
 from flwr.server import Server, SimpleClientManager
@@ -33,6 +34,7 @@ from fedzero.config import STOPPING_CRITERIA
 from fedzero.runtime_optimization import execute_round
 from fedzero.scenarios import Scenario
 from fedzero.selection_strategy import SelectionStrategy
+from fedzero.entities import Client
 
 
 class FedZeroClientManager(SimpleClientManager):
@@ -198,6 +200,12 @@ class FedZeroServer(Server):
         if selection is None:
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
+        else:
+            batches = selection.sum(axis=1)
+            energy = pd.Series()
+            for index, item in batches.items():
+                index: Client
+                energy[index] = item * index.energy_per_batch
 
         expected_duration = len(selection.columns)
         participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection, self.min_epochs, self.max_epochs)
