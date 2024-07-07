@@ -20,6 +20,8 @@ class Client:
         self.num_samples = 0.0
         self._statistical_utilities: Dict = {}
 
+        self.is_brown = False
+
     @property
     def batches_per_epoch(self) -> int:
         return math.ceil(self.num_samples / BATCH_SIZE)

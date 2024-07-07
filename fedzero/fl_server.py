@@ -34,8 +34,6 @@ from fedzero.config import STOPPING_CRITERIA
 from fedzero.runtime_optimization import execute_round
 from fedzero.scenarios import Scenario
 from fedzero.selection_strategy import SelectionStrategy
-from fedzero.entities import Client
-
 
 class FedZeroClientManager(SimpleClientManager):
     """For this client manager the next sample is set manually on each round in the FedZeroServer."""
@@ -179,6 +177,7 @@ class FedZeroServer(Server):
 
             # Report participation per client
             for c in self.client_load_api.get_clients():
+                c.is_brown = False
                 client_participation = participation[c.name] if c.name in participation else 0
                 self.writer.add_scalar(f"client_participation/{c.name}", client_participation, **tb_props)
 
@@ -200,12 +199,8 @@ class FedZeroServer(Server):
         if selection is None:
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
-        else:
-            batches = selection.sum(axis=1)
-            energy = pd.Series()
-            for index, item in batches.items():
-                index: Client
-                energy[index] = item * index.energy_per_batch
+        
+
 
         expected_duration = len(selection.columns)
         participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection, self.min_epochs, self.max_epochs)

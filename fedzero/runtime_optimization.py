@@ -112,23 +112,27 @@ def _execute_power_domain_timestep(clients: List[Client],
 def _attribute_power(required_epochs, participation, available_energy, max_batches):
     """Attributes power to all clients below <required_epochs>."""
     missing_batches = {c: c.batches_per_epoch * required_epochs - p for c, p in participation.items()}
-    clients = [c for c in participation.keys() if missing_batches[c] > 0]
+    clients: list[Client] = [c for c in participation.keys() if missing_batches[c] > 0]
     weighting = {c: missing_batches[c] * c.energy_per_batch for c in clients}
 
     model = grb.Model(name="Runtime power attribution model", env=GUROBI_ENV)
 
     # capping the available_energy to the max of possible usage allows us to use an equality constraint in (1)
-    _available_energy = min(available_energy, sum([max_batches[c] * c.energy_per_batch for c in clients]))
+    _available_energy = min(available_energy, sum([max_batches[c] * c.energy_per_batch for c in clients if not c.is_brown]))
 
     m = {c: model.addVar(lb=0, ub=max_batches[c]) for c in clients}
     y = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
     x = model.addVar(lb=0, ub=_available_energy/EPSILON)
 
-    model.addConstr(grb.quicksum(m[c] * c.energy_per_batch for c in clients) <= _available_energy)
-    for c in clients:
+    model.addConstr(grb.quicksum(m[c] * c.energy_per_batch for c in clients if (not c.is_brown)) <= _available_energy)
+    for c in [_client for _client in clients if not _client.is_brown]:
         model.addGenConstrIndicator(y[c], False, m[c] == x * weighting[c])
         model.addGenConstrIndicator(y[c], True, m[c] >= max_batches[c])
         model.addGenConstrIndicator(y[c], True, x * weighting[c] >= max_batches[c])
+
+    for c in [_client for _client in clients if _client.is_brown]:
+        model.addConstr(y[c] == True)
+        model.addConstr(m[c] == max_batches[c])
 
     model.ModelSense = grb.GRB.MAXIMIZE
     model.setObjective(x)
@@ -136,7 +140,7 @@ def _attribute_power(required_epochs, participation, available_energy, max_batch
 
     if model.Status == grb.GRB.OPTIMAL:
         participation = {c: xc.X for c, xc in m.items()}
-        remaining_energy = available_energy - sum(p * c.energy_per_batch for c, p in participation.items())
+        remaining_energy = available_energy - sum(p * c.energy_per_batch for c, p in participation.items() if not c.is_brown)
         return participation, 0 if np.isclose(remaining_energy, 0) else remaining_energy
     elif model.Status == grb.GRB.INFEASIBLE:
         raise RuntimeError("INFEASIBLE")
