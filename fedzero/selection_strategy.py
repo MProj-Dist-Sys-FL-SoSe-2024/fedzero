@@ -10,7 +10,7 @@ from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LO
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
-from fedzero.config import BROWN_CLIENTS_ALLOWANCE, BROWN_CLIENTS_PERCENTAGE
+from fedzero.config import BROWN_CLIENTS_ALLOWANCE, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE
 
 _sum = grb.quicksum
 
@@ -137,8 +137,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             # Sum Energy
             limit = energy.sum()
             # Define upper energy limit and lower client limit
-            limit = int(limit * BROWN_CLIENTS_PERCENTAGE)
-            min_brown_clients = max(1, self.clients_per_round * BROWN_CLIENTS_PERCENTAGE)
+            limit = int(limit * BROWN_CLIENTS_BUDGET_PERCENTAGE)
+            min_brown_clients = max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE)
             brown_clients = [_client for _client in client_load_api.get_clients() if _client not in filtered_clients]
             for client in brown_clients:
                 client.is_brown = True

@@ -75,8 +75,15 @@ def _execute_power_domain_round(power_domain_api: PowerDomainApi,
             continue
 
         # Minimum of how much the client can compute on excess capacity and until it reaches it max local epochs
-        max_batches = {c: int(min(client_load_api.actual(now, c.name), c.batches_per_epoch * max_epochs - participation[c])) 
-                       for c in participation.keys()}
+        max_batches = {
+            c: int(min(client_load_api.actual(now, c.name), c.batches_per_epoch * max_epochs - participation[c])) 
+            for c in participation.keys() if (not c.is_brown)
+        }
+        max_batches.update(
+            {
+                c: selection[now][c] for c in participation.keys() if c.is_brown
+            }
+        )
 
         participation = _execute_power_domain_timestep(clients=clients_below_max,
                                                        participation=participation,
