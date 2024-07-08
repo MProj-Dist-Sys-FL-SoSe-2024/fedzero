@@ -139,6 +139,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             # Define upper energy limit and lower client limit
             limit = int(limit * BROWN_CLIENTS_BUDGET_PERCENTAGE)
             min_brown_clients = max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE)
+            # Maybe add unused green clients
+            # Maybe filter by already used clients / change utility judge to avoid biases
             brown_clients = [_client for _client in client_load_api.get_clients() if _client not in filtered_clients]
             for client in brown_clients:
                 client.is_brown = True
