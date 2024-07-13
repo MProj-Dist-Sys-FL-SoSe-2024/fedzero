@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 
 from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, MIN_LOCAL_EPOCHS, MAX_LOCAL_EPOCHS, \
-    CLIENTS_PER_ROUND, GUROBI_ENV
+    CLIENTS_PER_ROUND, GUROBI_ENV, ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW, TIME_WINDOW_LOWER_BOUND, \
+    TIME_WINDOW_UPPER_BOUND
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 
 EPSILON = 0.0001
@@ -17,7 +18,8 @@ def execute_round(power_domain_api: PowerDomainApi,
                   client_load_api: ClientLoadApi,
                   selection: pd.DataFrame,
                   min_epochs: float,
-                  max_epochs: float) -> Tuple[Dict[str, int], timedelta]:
+                  max_epochs: float,
+                  server_round: int) -> Tuple[Dict[str, int], timedelta]:
     """Simulates the execution of a training round."""
     selection = _extend_selection_df(selection)
     time_iterator = [_execute_power_domain_round(power_domain_api, client_load_api, zone, p_selection, max_epochs)
@@ -33,7 +35,14 @@ def execute_round(power_domain_api: PowerDomainApi,
                 participation[client] = part
                 if participation[client] >= client.batches_per_epoch * min_epochs:
                     n_clients_above_min_epochs += 1
-        if n_clients_above_min_epochs >= CLIENTS_PER_ROUND:
+        # do not automatically break if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW is enabled
+        if n_clients_above_min_epochs >= CLIENTS_PER_ROUND and not ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW:
+            break
+
+        # break if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW is enabled and the server round is not within the time window
+        if ((ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW
+                and not TIME_WINDOW_LOWER_BOUND <= server_round <= TIME_WINDOW_UPPER_BOUND)
+                and n_clients_above_min_epochs >= CLIENTS_PER_ROUND):
             break
 
     for client, client_participation in participation.items():
@@ -74,7 +83,7 @@ def _execute_power_domain_round(power_domain_api: PowerDomainApi,
             continue
 
         # Minimum of how much the client can compute on excess capacity and until it reaches it max local epochs
-        max_batches = {c: int(min(client_load_api.actual(now, c.name), c.batches_per_epoch * max_epochs - participation[c])) 
+        max_batches = {c: int(min(client_load_api.actual(now, c.name), c.batches_per_epoch * max_epochs - participation[c]))
                        for c in participation.keys()}
 
         participation = _execute_power_domain_timestep(clients=clients_below_max,
