@@ -15,6 +15,7 @@
 """Flower server."""
 import json
 import time
+from copy import deepcopy
 from datetime import datetime, timedelta
 from logging import DEBUG, INFO
 from typing import Dict, List, Optional, Tuple
@@ -68,6 +69,7 @@ class FedZeroServer(Server):
         self._last_agg_local_loss_ema = None
         self._last_agg_local_accuracy = None
         self._last_agg_local_accuracy_ema = None
+        self._last_metrics = None
         super(FedZeroServer, self).__init__(client_manager=FedZeroClientManager(), strategy=strategy)
 
     _ema_window = 5
@@ -107,26 +109,36 @@ class FedZeroServer(Server):
             # Train model and replace previous global model
             while True:
                 start_time_fit = time.time()
-                res_fit = self.fit_round_ra(server_round=current_round, now=now, timeout=timeout)
+                res_fit = self.fit_round_ra(server_round=current_round, now=now,
+                                            timeout=timeout)
                 tb_props = dict(global_step=current_round, walltime=now.timestamp())
                 if res_fit:
                     print(f'Select & fit time: {time.time() - start_time_fit:.1f} s')
                     parameters, metrics, _, participation, new_now = res_fit  # fit_metrics_aggregated
+                    self._last_metrics = deepcopy(metrics)
                     duration = new_now - now
                     if parameters:
                         self.parameters = parameters
                     # Write Loss Metrics
                     self.writer.add_scalar("train_loss", metrics.get("local_train_loss", np.nan), **tb_props)
-                    self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan), **tb_props)
-                    self.writer.add_scalar("train_loss_delta_ema", metrics.get("local_train_loss_delta_ema", np.nan), **tb_props)
-                    self.writer.add_scalar("weighted_train_loss_delta", metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
-                    self.writer.add_scalar("weighted_train_loss_delta_ema", metrics.get("local_weighted_train_loss_delta_ema", np.nan), **tb_props)
+                    self.writer.add_scalar("train_loss_delta", metrics.get("local_train_loss_delta", np.nan),
+                                           **tb_props)
+                    self.writer.add_scalar("train_loss_delta_ema", metrics.get("local_train_loss_delta_ema", np.nan),
+                                           **tb_props)
+                    self.writer.add_scalar("weighted_train_loss_delta",
+                                           metrics.get("local_weighted_train_loss_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_loss_delta_ema",
+                                           metrics.get("local_weighted_train_loss_delta_ema", np.nan), **tb_props)
                     # Write Accuracy Metrics
                     self.writer.add_scalar("train_accuracy", metrics.get("local_train_acc", np.nan), **tb_props)
-                    self.writer.add_scalar("train_accuracy_delta", metrics.get("local_train_acc_delta", np.nan), **tb_props)
-                    self.writer.add_scalar("train_accuracy_delta_ema", metrics.get("local_train_acc_delta_ema", np.nan), **tb_props)
-                    self.writer.add_scalar("weighted_train_accuracy_delta", metrics.get("local_weighted_train_acc_delta", np.nan), **tb_props)
-                    self.writer.add_scalar("weighted_train_accuracy_delta_ema", metrics.get("local_weighted_train_acc_delta_ema", np.nan), **tb_props)
+                    self.writer.add_scalar("train_accuracy_delta", metrics.get("local_train_acc_delta", np.nan),
+                                           **tb_props)
+                    self.writer.add_scalar("train_accuracy_delta_ema", metrics.get("local_train_acc_delta_ema", np.nan),
+                                           **tb_props)
+                    self.writer.add_scalar("weighted_train_accuracy_delta",
+                                           metrics.get("local_weighted_train_acc_delta", np.nan), **tb_props)
+                    self.writer.add_scalar("weighted_train_accuracy_delta_ema",
+                                           metrics.get("local_weighted_train_acc_delta_ema", np.nan), **tb_props)
                     break
                 now += timedelta(minutes=5)  # wait for 5 min and try again
 
@@ -156,19 +168,23 @@ class FedZeroServer(Server):
             self.writer.add_scalar("round_duration", round_duration_in_min, **tb_props)
 
             # Report energy usage
-            used_energy = _ws_to_kwh(sum(client.participated_batches * client.energy_per_batch for client in self.client_load_api.get_clients()))
+            used_energy = _ws_to_kwh(sum(
+                client.participated_batches * client.energy_per_batch for client in self.client_load_api.get_clients()))
             self.writer.add_scalar("energy/total", used_energy, **tb_props)
 
             # Report round energy usage
-            round_energy = sum(_ws_to_kwh(c.energy_per_batch) * participation[c.name] for c in self.client_load_api.get_clients()
-                               if c.name in participation)
+            round_energy = sum(
+                _ws_to_kwh(c.energy_per_batch) * participation[c.name] for c in self.client_load_api.get_clients()
+                if c.name in participation)
             self.writer.add_scalar("energy/round", round_energy, **tb_props)
 
             # Report energy per domain
             round_energy_per_domain_round = {zone: 0.0 for zone in self.power_domain_api.zones}
             for zone in self.power_domain_api.zones:
                 clients_in_zone = [client for client in self.client_load_api.get_clients() if client.zone == zone]
-                self.writer.add_scalar(f"energy_per_domain/{zone}", _ws_to_kwh(sum(client.participated_batches * client.energy_per_batch for client in clients_in_zone)), **tb_props)
+                self.writer.add_scalar(f"energy_per_domain/{zone}", _ws_to_kwh(
+                    sum(client.participated_batches * client.energy_per_batch for client in clients_in_zone)),
+                                       **tb_props)
                 for c in clients_in_zone:
                     if c.name in participation:
                         round_energy_per_domain_round[zone] += _ws_to_kwh(c.energy_per_batch) * participation[c.name]
@@ -191,21 +207,29 @@ class FedZeroServer(Server):
         log(INFO, "FL finished.")
         return history
 
-    def fit_round_ra(self, server_round: int, now: datetime, timeout: Optional[float]) -> Optional[
-        Tuple[Optional[Parameters], Dict, FitResultsAndFailures, Dict[str, int], datetime]]:
+    def fit_round_ra(self, server_round: int, now: datetime, timeout: Optional[float]) -> \
+            Optional[Tuple[Optional[Parameters], Dict, FitResultsAndFailures, Dict[str, int], datetime]]:
         """Perform a single round of federated averaging."""
-        selection = self.selection_strategy.select(self.power_domain_api, self.client_load_api, round_number=server_round, now=now)
+        selection = self.selection_strategy.select(self.power_domain_api, self.client_load_api,
+                                                   round_number=server_round, now=now)
         if selection is None:
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
 
         expected_duration = len(selection.columns)
-        participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection, self.min_epochs, self.max_epochs, server_round)
-        log(DEBUG, f"Round {server_round} ({now}) training {int(round_duration.seconds/60)} min ({expected_duration} min expected) "
-                   f"on {len(participation)} clients: {participation}")
+        participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection,
+                                                      self.min_epochs, self.max_epochs, server_round)
+        log(DEBUG,
+            f"Round {server_round} ({now}) training {int(round_duration.seconds / 60)} min ({expected_duration} min expected) "
+            f"on {len(participation)} clients: {participation}")
         if len(participation) == 0:
             log(INFO, f"fit_round {server_round} ({now}) no clients reached min epochs.")
             return None, {}, None, participation, now + round_duration
+
+        # Log the number of selected clients to TensorBoard
+        selected_clients_count = len(participation)
+        tb_props = dict(global_step=server_round, walltime=now.timestamp())
+        self.writer.add_scalar("selected_clients_count", selected_clients_count, **tb_props)
 
         # Get clients and their respective instructions from strategy
         self._client_manager: FedZeroClientManager
@@ -227,23 +251,26 @@ class FedZeroServer(Server):
             timeout=timeout,
         )
         if failures:
-            raise RuntimeError(f"Round {server_round} ({now}) received {len(results)} results and {len(failures)} failures")
+            raise RuntimeError(
+                f"Round {server_round} ({now}) received {len(results)} results and {len(failures)} failures")
 
         training_losses = {client_proxy.cid: result.metrics["local_loss"] for client_proxy, result in results}
         training_sample_size = {client_proxy.cid: result.metrics["number_samples"] for client_proxy, result in results}
         training_accs = {client_proxy.cid: result.metrics["local_acc"] for client_proxy, result in results}
-        statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in results}
+        statistical_utilities = {client_proxy.cid: result.metrics["statistical_utility"] for client_proxy, result in
+                                 results}
 
         # Initialise the variables for accuracy
-        agg_local_train_acc = np.nan # mean average
-        agg_local_weighted_avg_train_acc = np.nan # weighted average
-        agg_local_train_acc_delta = np.nan # weighted average delta
-        agg_local_weighted_train_acc_delta = np.nan # weighted average delta ema smoothed
+        agg_local_train_acc = np.nan  # mean average
+        agg_local_weighted_avg_train_acc = np.nan  # weighted average
+        agg_local_train_acc_delta = np.nan  # weighted average delta
+        agg_local_weighted_train_acc_delta = np.nan  # weighted average delta ema smoothed
 
         # Aggregate Accuracy
         agg_local_train_acc = np.mean(list(training_accs.values()))
         if self._last_agg_local_accuracy != None:
-            agg_local_weighted_avg_train_acc = np.average(list(training_accs.values()), weights=list(training_sample_size.values()))
+            agg_local_weighted_avg_train_acc = np.average(list(training_accs.values()),
+                                                          weights=list(training_sample_size.values()))
             agg_local_train_acc_delta = abs(agg_local_weighted_avg_train_acc - self._last_agg_local_accuracy[1])
             agg_local_weighted_train_acc_delta = abs(agg_local_train_acc - self._last_agg_local_accuracy[0])
 
@@ -253,15 +280,16 @@ class FedZeroServer(Server):
         )
 
         # Initialise the variables for loss
-        agg_local_train_loss = np.nan # mean average
-        agg_local_weighted_avg_train_loss = np.nan # weighted average
-        agg_local_train_loss_delta = np.nan # weighted average delta
-        agg_local_weighted_train_loss_delta = np.nan # weighted average delta ema smoothed
+        agg_local_train_loss = np.nan  # mean average
+        agg_local_weighted_avg_train_loss = np.nan  # weighted average
+        agg_local_train_loss_delta = np.nan  # weighted average delta
+        agg_local_weighted_train_loss_delta = np.nan  # weighted average delta ema smoothed
 
         # Aggregate Loss
         agg_local_train_loss = np.mean(list(training_losses.values()))
         if self._last_agg_local_loss != None:
-            agg_local_weighted_avg_train_loss = np.average(list(training_losses.values()), weights=list(training_sample_size.values()))
+            agg_local_weighted_avg_train_loss = np.average(list(training_losses.values()),
+                                                           weights=list(training_sample_size.values()))
             agg_local_train_loss_delta = abs(agg_local_weighted_avg_train_loss - self._last_agg_local_loss[1])
             agg_local_weighted_train_loss_delta = abs(agg_local_train_loss - self._last_agg_local_loss[0])
 
@@ -275,17 +303,21 @@ class FedZeroServer(Server):
         # or if their values are np.nan (happens during the second round, 
         # because the last values are initialised with the nan values of the last accuracy/loss values during the first round)
         if (self._last_agg_local_accuracy_ema is None or self._last_agg_local_loss_ema is None) \
-            or (np.nan in self._last_agg_local_accuracy_ema or np.nan in self._last_agg_local_loss_ema):
+                or (np.nan in self._last_agg_local_accuracy_ema or np.nan in self._last_agg_local_loss_ema):
             self._last_agg_local_accuracy_ema = self._last_agg_local_accuracy
             self._last_agg_local_loss_ema = self._last_agg_local_loss
         else:
             self._last_agg_local_accuracy_ema = (
-                FedZeroServer.ema(agg_local_train_acc_delta, self._last_agg_local_accuracy_ema[0], FedZeroServer._ema_alpha),
-                FedZeroServer.ema(agg_local_weighted_train_acc_delta, self._last_agg_local_accuracy_ema[1], FedZeroServer._ema_alpha)
+                FedZeroServer.ema(agg_local_train_acc_delta, self._last_agg_local_accuracy_ema[0],
+                                  FedZeroServer._ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_acc_delta, self._last_agg_local_accuracy_ema[1],
+                                  FedZeroServer._ema_alpha)
             )
             self._last_agg_local_loss_ema = (
-                FedZeroServer.ema(agg_local_train_loss_delta, self._last_agg_local_loss_ema[0], FedZeroServer._ema_alpha),
-                FedZeroServer.ema(agg_local_weighted_train_loss_delta, self._last_agg_local_loss_ema[1], FedZeroServer._ema_alpha)
+                FedZeroServer.ema(agg_local_train_loss_delta, self._last_agg_local_loss_ema[0],
+                                  FedZeroServer._ema_alpha),
+                FedZeroServer.ema(agg_local_weighted_train_loss_delta, self._last_agg_local_loss_ema[1],
+                                  FedZeroServer._ema_alpha)
             )
 
         for client in self.client_load_api.get_clients():

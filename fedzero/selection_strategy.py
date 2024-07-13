@@ -56,13 +56,14 @@ class RandomSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"random{'_fc' if self.use_forecasts else ''}"
 
-    def select(
-        self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime
-    ) -> Optional[pd.DataFrame]:
-        """Selects <CLIENTS_PER_ROUND> randomly if they have energy and capacity"""
+    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+               round_number: int, now: datetime, allow_brown_clients=False) -> Optional[pd.DataFrame]:
+        """Selects <CLIENTS_PER_ROUND> randomly if they have energy and capacity
+        """
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
         if self.use_forecasts:
-            clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN), self.min_epochs)
+            clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now,
+                                                               int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN), self.min_epochs)
         if len(clients) < self.clients_per_round:
             return None
 
@@ -95,7 +96,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
 
-    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+               round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         TRANSITION_PERIOD_H = 12
         wallah = self.cycle_participation_mean
         if self.cycle_start is None:
@@ -251,12 +253,14 @@ class OortSelectionStrategy(SelectionStrategy):
     def __repr__(self):
         return f"oort{'_fc' if self.use_forecasts else ''}"
 
-    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi, round_number: int, now: datetime) -> Optional[pd.DataFrame]:
+    def select(self, power_domain_api: PowerDomainApi, client_load_api: ClientLoadApi,
+               round_number: int, now: datetime) -> Optional[pd.DataFrame]:
         # register clients
         if len(self.oort_selector.totalArms) == 0:
             for client in client_load_api.get_clients():
                 timesteps_per_epoch = client.batches_per_epoch / client.batches_per_timestep
-                self.oort_selector.register_client(clientId=client.name, size=client.num_samples, duration=timesteps_per_epoch)
+                self.oort_selector.register_client(clientId=client.name, size=client.num_samples,
+                                                   duration=timesteps_per_epoch)
 
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
         if len(clients) < self.clients_per_round:
@@ -275,7 +279,8 @@ class OortSelectionStrategy(SelectionStrategy):
                 )
             else:
                 expected_duration_based_on_capacity = required_batches / client_load_api.actual(now, client.name)
-                expected_duration_based_on_energy = required_batches * client.energy_per_batch / power_domain_api.actual(now, client.zone)
+                expected_duration_based_on_energy = required_batches * client.energy_per_batch / power_domain_api.actual(
+                    now, client.zone)
             expected_duration = max(expected_duration_based_on_capacity, expected_duration_based_on_energy)
 
             if client.participated_in_last_round(round_number):
@@ -285,7 +290,8 @@ class OortSelectionStrategy(SelectionStrategy):
                 self.oort_selector.update_duration(clientId=client.name, duration=expected_duration)
 
         selected_client_names = self.oort_selector.select_participant(self.clients_per_round,
-                                                                      feasible_clients=[client.name for client in clients])
+                                                                      feasible_clients=[client.name for client in
+                                                                                        clients])
         index = [c for c in client_load_api.get_clients() if c.name in selected_client_names]
         return pd.DataFrame(1, index=index, columns=[now + timedelta(minutes=TIMESTEP_IN_MIN)])
 
@@ -303,7 +309,8 @@ def _filterby_current_capacity_and_energy(power_domain_api: PowerDomainApi,
                                           client_load_api: ClientLoadApi,
                                           now: datetime) -> List[Client]:
     zones_with_energy = [zone for zone in power_domain_api.zones if power_domain_api.actual(now, zone) > 0.0]
-    clients = [client for client in client_load_api.get_clients(zones_with_energy) if client_load_api.actual(now, client.name) > 0.0]
+    clients = [client for client in client_load_api.get_clients(zones_with_energy) if
+               client_load_api.actual(now, client.name) > 0.0]
     print(f"There are {len(clients)} clients available across {len(zones_with_energy)} power domains.")
     return clients
 
@@ -325,7 +332,8 @@ def _filterby_forecasted_capacity_and_energy(power_domain_api: PowerDomainApi,
     filtered_clients: List[Client] = []
     for client in clients:
         possible_batches = client_load_api.forecast(now, duration_in_timesteps=d, client_name=client.name)
-        ree_powered_batches = power_domain_api.forecast(now, duration_in_timesteps=d, zone=client.zone) / client.energy_per_batch
+        ree_powered_batches = power_domain_api.forecast(now, duration_in_timesteps=d,
+                                                        zone=client.zone) / client.energy_per_batch
         # Significantly faster than pandas
         total_max_batches = np.minimum(possible_batches.values, ree_powered_batches.values).sum()
         if total_max_batches >= client.batches_per_epoch * min_epochs:
