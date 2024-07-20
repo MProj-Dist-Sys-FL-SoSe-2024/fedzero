@@ -205,7 +205,7 @@ def simulate_fl_training(experiment: Experiment, device: torch.device, mock: boo
 @click.option('--cpu', is_flag=True, default=False)
 def main(scenario: str, dataset: str, approach: str, overselect: float, forecast_error: str,
          imbalanced_scenario: bool, mock: bool, seed: Optional[int], runs: Optional[int], iid: Optional[bool], cpu: Optional[bool]):
-    for _ in range(0, runs):
+    for i in range(0, runs):
         assert overselect >= 1
         clients_per_round = int(CLIENTS_PER_ROUND * overselect)
 

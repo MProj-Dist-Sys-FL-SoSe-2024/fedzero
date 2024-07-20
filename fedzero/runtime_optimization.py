@@ -45,10 +45,10 @@ def execute_round(power_domain_api: PowerDomainApi,
         c: Client
         minimum = c.batches_per_epoch * MIN_LOCAL_EPOCHS
         if math.floor(p) >= minimum:
-            print(f"{c.name} - brown {c.is_brown} computes {math.floor(p)} (above {minimum})")
+            print(f"{c.name} - {"BROWN" if c.is_brown else "GREEN"} computes {math.floor(p)} (above {minimum})")
             computed_batches[c.name] = math.floor(p)
         else:
-            print(f"{c.name} - brown {c.is_brown} computes {math.floor(p)} (BELOW {minimum})")
+            print(f"{c.name} - {"BROWN" if c.is_brown else "GREEN"} computes {math.floor(p)} (BELOW {minimum})")
 
     return computed_batches, round_duration
 
@@ -129,7 +129,7 @@ def _attribute_power(required_epochs, participation, available_energy, max_batch
     model = grb.Model(name="Runtime power attribution model", env=GUROBI_ENV)
 
     # capping the available_energy to the max of possible usage allows us to use an equality constraint in (1)
-    _available_energy = min(available_energy, sum([max_batches[c] * c.energy_per_batch for c in clients if not c.is_brown]))
+    _available_energy = min(available_energy, sum([max_batches[c] * c.energy_per_batch for c in clients if (not c.is_brown)]))
 
     m = {c: model.addVar(lb=0, ub=max_batches[c]) for c in clients}
     y = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
@@ -151,7 +151,7 @@ def _attribute_power(required_epochs, participation, available_energy, max_batch
 
     if model.Status == grb.GRB.OPTIMAL:
         participation = {c: xc.X for c, xc in m.items()}
-        remaining_energy = available_energy - sum(p * c.energy_per_batch for c, p in participation.items() if not c.is_brown)
+        remaining_energy = available_energy - sum(p * c.energy_per_batch for c, p in participation.items() if (not c.is_brown))
         return participation, 0 if np.isclose(remaining_energy, 0) else remaining_energy
     elif model.Status == grb.GRB.INFEASIBLE:
         raise RuntimeError("INFEASIBLE")
