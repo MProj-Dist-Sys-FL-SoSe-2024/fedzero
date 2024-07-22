@@ -45,10 +45,10 @@ def execute_round(power_domain_api: PowerDomainApi,
         c: Client
         minimum = c.batches_per_epoch * MIN_LOCAL_EPOCHS
         if math.floor(p) >= minimum:
-            print(f"{c.name} - {"BROWN" if c.is_brown else "GREEN"} computes {math.floor(p)} (above {minimum})")
+            print(f"{c.name} - {'BROWN' if c.is_brown else 'GREEN'} computes {math.floor(p)} (above {minimum})")
             computed_batches[c.name] = math.floor(p)
         else:
-            print(f"{c.name} - {"BROWN" if c.is_brown else "GREEN"} computes {math.floor(p)} (BELOW {minimum})")
+            print(f"{c.name} - {'BROWN' if c.is_brown else 'GREEN'} computes {math.floor(p)} (BELOW {minimum})")
 
     return computed_batches, round_duration
 
