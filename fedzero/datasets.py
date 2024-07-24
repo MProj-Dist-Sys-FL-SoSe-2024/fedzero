@@ -16,7 +16,7 @@ from scipy.special import softmax
 from torch.utils.data import Dataset, DataLoader, random_split, SubsetRandomSampler
 from tqdm import tqdm
 
-from fedzero.config import NIID_DATA_SEED
+from fedzero.config import NIID_DATA_SEED, DATA_SUBSET
 from fedzero.kwt.utils.dataset import get_loader
 
 ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -68,7 +68,15 @@ def load_cifar(cifar_type: str, num_clients: int, batch_size: int, beta: float):
     testset: Dataset = getattr(torchvision.datasets, cifar_type)(
         "./data", train=False, download=True, transform=test_transforms
     )
-
+    # DATA_SUBSET = 0.1
+    # if DATA_SUBSET < 1 and DATA_SUBSET > 0:
+    #     targets = trainset.targets
+    #     trainset = random_split(trainset, [round(DATA_SUBSET, 2), round(1 - DATA_SUBSET, 2)], torch.Generator().manual_seed(42))[0]
+    #     trainset.targets = targets
+    indices = len(trainset)
+    _trainset = Subset(trainset, list(range(0, indices, round(1 / DATA_SUBSET))))
+    _trainset.targets = [trainset.targets[i] for i in range(0, indices, round(1 / DATA_SUBSET))]
+    trainset = _trainset
     trainloaders = []
     if 0.0 < beta < 1.0:
         client_to_data_ids = _get_niid_client_data_ids(trainset, num_clients, beta)

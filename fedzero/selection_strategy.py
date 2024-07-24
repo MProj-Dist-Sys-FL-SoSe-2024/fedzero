@@ -92,6 +92,18 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         self.cycle_start: Optional[datetime] = None
         self.cycle_participation_mean = 0
 
+    @property
+    def exclusion_factor(self):
+        if BROWN_CLIENTS_ALLOWANCE:
+            return self._brown_exclusion_factor
+        else:
+            return self._exclusion_factor
+    
+    @exclusion_factor.setter
+    def exclusion_factor(self, value):
+        self._exclusion_factor = value
+        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self.exclusion_factor * 0.25)
+
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
 

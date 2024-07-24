@@ -10,9 +10,11 @@ MAX_ROUNDS = 60
 MAX_TIME_IN_DAYS = 7  # currently 11 max
 STOPPING_CRITERIA = None  # rounds without improved accuracy
 
-BROWN_CLIENTS_ALLOWANCE = True
-BROWN_CLIENTS_BUDGET_PERCENTAGE = 0.3
-BROWN_CLIENTS_NUMBER_PERCENTAGE = 0.3
+BROWN_CLIENTS_ALLOWANCE = False
+BROWN_CLIENTS_BUDGET_PERCENTAGE = 0.5
+BROWN_CLIENTS_NUMBER_PERCENTAGE = 0.5
+
+DATA_SUBSET = 0.1
 
 NUM_CLIENTS = 100
 CLIENTS_PER_ROUND = 10
@@ -28,7 +30,7 @@ RAY_CLIENT_RESOURCES = {
     # "num_gpus": 1 / 3
 }
 RAY_INIT_ARGS = {
-    # "num_cpus": 8,  # Number of physically accessible CPUs
+    "num_cpus": 8,  # Number of physically accessible CPUs
     # "num_gpus": 1,  # Number of physically accessible GPUs
     "ignore_reinit_error": True,
     "include_dashboard": False,

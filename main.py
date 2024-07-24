@@ -138,7 +138,7 @@ def simulate_fl_training(experiment: Experiment, device: torch.device, mock: boo
         c.num_samples = len(trainloader) * BATCH_SIZE
         required_time = c.num_samples / (c.batches_per_timestep * BATCH_SIZE)
         # if required_time <= 5 or required_time >= 55:
-        print(f"{i+1:>3}: {required_time:.0f} mins ({len(trainloader)} batches at {c.batches_per_timestep:.1f} batches/min)")
+        print(f"{i+1:>3}: {required_time:.0f} mins ({len(trainloader)} batches at {c.batches_per_timestep:.1f} batches/min with {c.energy_per_batch} watt/batch)")
 
     def client_fn(client_name) -> NumPyClient:
         client_id = int(client_name.split('_')[0])
