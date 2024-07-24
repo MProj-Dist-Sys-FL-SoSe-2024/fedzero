@@ -200,10 +200,11 @@ class FedZeroServer(Server):
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
         
-
-
         expected_duration = len(selection.columns)
         participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection, self.min_epochs, self.max_epochs)
+        selected_clients_count = len(participation)
+        tb_props = dict(global_step=server_round, walltime=now.timestamp())
+        self.writer.add_scalar("selected_clients_count", selected_clients_count, **tb_props)
         log(DEBUG, f"Round {server_round} ({now}) training {int(round_duration.seconds/60)} min ({expected_duration} min expected) "
                    f"on {len(participation)} clients: {participation}")
         if len(participation) == 0:

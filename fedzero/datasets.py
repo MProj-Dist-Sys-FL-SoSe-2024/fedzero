@@ -8,6 +8,7 @@ import zipfile
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset, DataLoader, Subset
 import torch.utils.model_zoo as model_zoo
 import torchvision
 import torchvision.transforms as transforms
@@ -61,12 +62,13 @@ def load_cifar(cifar_type: str, num_clients: int, batch_size: int, beta: float):
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
     ])
 
-    trainset = getattr(torchvision.datasets, cifar_type)(
+    trainset: Dataset = getattr(torchvision.datasets, cifar_type)(
         "./data", train=True, download=True, transform=train_transforms
     )
-    testset = getattr(torchvision.datasets, cifar_type)(
+    testset: Dataset = getattr(torchvision.datasets, cifar_type)(
         "./data", train=False, download=True, transform=test_transforms
     )
+
     trainloaders = []
     if 0.0 < beta < 1.0:
         client_to_data_ids = _get_niid_client_data_ids(trainset, num_clients, beta)

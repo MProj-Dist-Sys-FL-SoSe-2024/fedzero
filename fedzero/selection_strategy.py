@@ -139,17 +139,19 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             limit = energy.sum()
             # Define upper energy limit and lower client limit
             limit = int(limit * BROWN_CLIENTS_BUDGET_PERCENTAGE)
-            min_brown_clients = max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE)
             brown_clients = [
                              _client for _client in client_load_api.get_clients() if
                              (_client not in filtered_clients)
                              and (_client not in self.excluded_clients)
                             ]
             brown_clients.extend(unused_green_clients)
+            min_brown_clients = min(len(brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
             for client in brown_clients:
                 client.is_brown = True
             if BROWN_CLIENTS_ALLOWANCE:
                 brown_solution = self._brown_selection(client_load_api, brown_clients, utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
+                if brown_solution is None or len(brown_solution.index) < min_brown_clients:
+                    continue
                 # Calc Brown Energy Series
                 brown_batches = brown_solution.sum(axis=1)
                 brown_energy = pd.Series()
@@ -158,7 +160,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                     brown_energy[index] = item * index.energy_per_batch
                 # Sum Brown Energy
                 brown_energy_sum = brown_energy.sum()
-                assert int(brown_energy_sum) <= limit * 1.01
+                if not (int(brown_energy_sum) <= limit * 1.01):
+                    raise RuntimeError(f"Brown Energy Limit Exceeded with {int(brown_energy_sum)} of {limit * 1.01}")
                 solution = pd.concat([solution, brown_solution])
             if solution is not None:
                 return solution
@@ -210,7 +213,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         model.addConstr(_sum(m_alloc[client, t] * client.energy_per_batch for client in clients for t in range(d)) <= l)
 
         for client in clients:
-            min_batches = client.batches_per_epoch * self.min_epochs
+            min_batches = (client.batches_per_epoch * self.min_epochs) + 1
             max_batches = client.batches_per_epoch * self.max_epochs
             model.addGenConstrIndicator(b[client], True, min_batches <= _sum(m_alloc[client, t] for t in range(d)))
             model.addGenConstrIndicator(b[client], True, max_batches >= _sum(m_alloc[client, t] for t in range(d)))
