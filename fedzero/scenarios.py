@@ -126,15 +126,15 @@ def get_client_sizes(net_arch_size_factor) -> Dict[str, Dict[str, float]]:
     # A100: 400W, 1237 images/sec
     return {
         "small": {
-            "batches_per_timestep": (183 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET),
+            "batches_per_timestep": max(1, (183 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
             "energy_per_batch": (70 / 183 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
         "mid": {
-            "batches_per_timestep": (639 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET),
+            "batches_per_timestep": max(1, (639 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
             "energy_per_batch": (300 / 639 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
         "large": {
-            "batches_per_timestep": (1237 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET),
+            "batches_per_timestep": max(1, (1237 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
             "energy_per_batch": (700 / 1237 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
     }

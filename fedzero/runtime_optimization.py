@@ -18,10 +18,10 @@ def execute_round(power_domain_api: PowerDomainApi,
                   client_load_api: ClientLoadApi,
                   selection: pd.DataFrame,
                   min_epochs: float,
-                  max_epochs: float,
-                  server_round: int) -> Tuple[Dict[str, int], timedelta]:
+                  max_epochs: float) -> Tuple[Dict[str, int], timedelta]:
     """Simulates the execution of a training round."""
     selection = _extend_selection_df(selection)
+    clients_in_round = len(selection.index)
     time_iterator = [_execute_power_domain_round(power_domain_api, client_load_api, zone, p_selection, max_epochs)
                      for zone, p_selection
                      in selection.groupby(lambda c: c.zone)]
@@ -35,14 +35,7 @@ def execute_round(power_domain_api: PowerDomainApi,
                 participation[client] = part
                 if participation[client] >= client.batches_per_epoch * min_epochs:
                     n_clients_above_min_epochs += 1
-        # do not automatically break if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW is enabled
-        if n_clients_above_min_epochs >= CLIENTS_PER_ROUND and not ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW:
-            break
-
-        # break if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW is enabled and the server round is not within the time window
-        if ((ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW
-                and not TIME_WINDOW_LOWER_BOUND <= server_round <= TIME_WINDOW_UPPER_BOUND)
-                and n_clients_above_min_epochs >= CLIENTS_PER_ROUND):
+        if n_clients_above_min_epochs >= clients_in_round:
             break
 
     for client, client_participation in participation.items():

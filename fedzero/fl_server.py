@@ -219,7 +219,7 @@ class FedZeroServer(Server):
         
         expected_duration = len(selection.columns)
         participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection,
-                                                      self.min_epochs, self.max_epochs, server_round)
+                                                      self.min_epochs, self.max_epochs)
         log(DEBUG,
             f"Round {server_round} ({now}) training {int(round_duration.seconds / 60)} min ({expected_duration} min expected) "
             f"on {len(participation)} clients: {participation}")

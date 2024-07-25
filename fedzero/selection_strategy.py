@@ -129,17 +129,14 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             print(f"Cycle mean: {self.cycle_participation_mean:.2f}, Current mean: {current_mean:.2f} factor: {factor}, result: {wallah} ###")
 
         # Filter clients if we are not inside the time window where brown clients are allowed
-        if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND:
-            clients = _filterby_current_capacity(client_load_api, now)
-        else:
-            clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
-            # update set of active clients for current cycle. Takes union of current set of active clients and the
-            # set of clients that are currently available and have enough energy and capacity
-            self.cycle_active_clients = self.cycle_active_clients.union(clients)
-            # when alpha is set to true, the list of clients that are excluded is updated based on the clients
-            # statistical utility and number of rounds they have participated in
-            if self.alpha:
-                self._update_excluded_clients(clients, round_number, wallah)
+        clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
+        # update set of active clients for current cycle. Takes union of current set of active clients and the
+        # set of clients that are currently available and have enough energy and capacity
+        self.cycle_active_clients = self.cycle_active_clients.union(clients)
+        # when alpha is set to true, the list of clients that are excluded is updated based on the clients
+        # statistical utility and number of rounds they have participated in
+        if self.alpha:
+            self._update_excluded_clients(clients, round_number, wallah)
 
             # filter out clients that are in the excluded clients list
             clients = [client for client in clients if client not in self.excluded_clients]
@@ -147,6 +144,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         utility = self.utility_judge.utility()
         for d in range(1, int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN) + 1):
             filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
+            filtered_clients_capacity = _filterby_current_capacity(client_load_api, clients, now, d, self.min_epochs)
             if len(filtered_clients) < self.clients_per_round:
                 continue
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
@@ -166,7 +164,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 limit = int(limit * BROWN_CLIENTS_BUDGET_PERCENTAGE)
                 brown_clients = [
                                  _client for _client in client_load_api.get_clients() if
-                                 (_client not in filtered_clients)
+                                 (_client not in filtered_clients_capacity)
                                  and (_client not in self.excluded_clients)
                                 ]
                 brown_clients.extend(unused_green_clients)
@@ -266,8 +264,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                            clients: List[Client],
                            utility: Dict[Client, float],
                            d: int,
-                           now: datetime,
-                           round_number: int):
+                           now: datetime):
         model = grb.Model(name="MIP Model", env=GUROBI_ENV)
 
         # defining the decision variables for a Gurobi optimization model, which will be used to allocate resources
@@ -392,11 +389,23 @@ def _filterby_current_capacity_and_energy(power_domain_api: PowerDomainApi,
 
 
 def _filterby_current_capacity(client_load_api: ClientLoadApi,
-                               now: datetime) -> List[Client]:
-    # Fetch all clients without filtering by energy availability
-    clients = [client for client in client_load_api.get_clients() if client_load_api.actual(now, client.name) > 0.0]
-    print(f"There are {len(clients)} clients available based on current capacity.")
-    return clients
+                                clients: List[Client],
+                                now: datetime,
+                                d: int,
+                                min_epochs: float) -> List[Client]:
+    # # Fetch all clients without filtering by energy availability
+    # clients = [client for client in client_load_api.get_clients() if client_load_api.actual(now, client.name) > 0.0]
+    # print(f"There are {len(clients)} clients available based on current capacity.")
+    # return clients
+
+    filtered_clients: List[Client] = []
+    for client in clients:
+        possible_batches = client_load_api.forecast(now, duration_in_timesteps=d, client_name=client.name)
+        # Significantly faster than pandas
+        total_max_batches = possible_batches.values.sum()
+        if total_max_batches >= client.batches_per_epoch * min_epochs:
+            filtered_clients.append(client)
+    return filtered_clients
 
 
 def _filterby_forecasted_capacity_and_energy(power_domain_api: PowerDomainApi,
