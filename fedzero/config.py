@@ -10,6 +10,10 @@ MAX_ROUNDS = 60
 MAX_TIME_IN_DAYS = 7  # currently 11 max
 STOPPING_CRITERIA = None  # rounds without improved accuracy
 
+ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW = True
+TIME_WINDOW_LOWER_BOUND = 1
+TIME_WINDOW_UPPER_BOUND = 10
+
 BROWN_CLIENTS_ALLOWANCE = True
 BROWN_EXCLUSION_UPDATE = True
 BROWN_CLIENTS_BUDGET_PERCENTAGE = 0.5
@@ -31,8 +35,10 @@ RAY_CLIENT_RESOURCES = {
     # "num_gpus": 1 / 3
 }
 RAY_INIT_ARGS = {
-    "num_cpus": 8,  # Number of physically accessible CPUs
-    # "num_gpus": 1,  # Number of physically accessible GPUs
+    # "num_cpus": 8,  # Number of physically accessible CPUs
+    # "num_gpus": 14,  # Number of physically accessible GPUs
     "ignore_reinit_error": True,
-    "include_dashboard": False,
+    "include_dashboard": True,
+    # "object_store_memory": 20*1024*1024*1024,  # Reduced to 30GB
+    # "memory": 80*1024*1024*1024,  # Allocating 80GB for tasks and actors, adjust as needed
 }
