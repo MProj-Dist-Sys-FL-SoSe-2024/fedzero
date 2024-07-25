@@ -21,6 +21,7 @@ from logging import DEBUG, INFO
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from flwr.common import Parameters, Scalar
 from flwr.common.logger import log
 from flwr.server import Server, SimpleClientManager
@@ -34,7 +35,6 @@ from fedzero.config import STOPPING_CRITERIA
 from fedzero.runtime_optimization import execute_round
 from fedzero.scenarios import Scenario
 from fedzero.selection_strategy import SelectionStrategy
-
 
 class FedZeroClientManager(SimpleClientManager):
     """For this client manager the next sample is set manually on each round in the FedZeroServer."""
@@ -193,6 +193,7 @@ class FedZeroServer(Server):
 
             # Report participation per client
             for c in self.client_load_api.get_clients():
+                c.is_brown = False
                 client_participation = participation[c.name] if c.name in participation else 0
                 self.writer.add_scalar(f"client_participation/{c.name}", client_participation, **tb_props)
 
@@ -215,13 +216,14 @@ class FedZeroServer(Server):
         if selection is None:
             log(INFO, f"fit_round {server_round} ({now}) no clients selected, cancel")
             return None
-
+        
         expected_duration = len(selection.columns)
         participation, round_duration = execute_round(self.power_domain_api, self.client_load_api, selection,
                                                       self.min_epochs, self.max_epochs, server_round)
         log(DEBUG,
             f"Round {server_round} ({now}) training {int(round_duration.seconds / 60)} min ({expected_duration} min expected) "
             f"on {len(participation)} clients: {participation}")
+
         if len(participation) == 0:
             log(INFO, f"fit_round {server_round} ({now}) no clients reached min epochs.")
             return None, {}, None, participation, now + round_duration

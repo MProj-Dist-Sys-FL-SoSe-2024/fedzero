@@ -1,6 +1,8 @@
 import os
 from dataclasses import dataclass
+from time import sleep
 from typing import Dict, Optional
+import traceback
 
 import click
 import flwr
@@ -139,7 +141,7 @@ def simulate_fl_training(experiment: Experiment, device: torch.device, mock: boo
         c.num_samples = len(trainloader) * BATCH_SIZE
         required_time = c.num_samples / (c.batches_per_timestep * BATCH_SIZE)
         # if required_time <= 5 or required_time >= 55:
-        print(f"{i+1:>3}: {required_time:.0f} mins ({len(trainloader)} batches at {c.batches_per_timestep:.1f} batches/min)")
+        print(f"{i+1:>3}: {required_time:.0f} mins ({len(trainloader)} batches at {c.batches_per_timestep:.1f} batches/min with {c.energy_per_batch} watt/batch)")
 
     def client_fn(client_name) -> NumPyClient:
         client_id = int(client_name.split('_')[0])
@@ -201,67 +203,78 @@ def simulate_fl_training(experiment: Experiment, device: torch.device, mock: boo
 @click.option('--imbalanced_scenario', is_flag=True, default=False)
 @click.option('--mock', is_flag=True, default=False)
 @click.option('--seed', type=int, default=None)
+@click.option('--runs', type=int, default=1)
+@click.option('--iid', is_flag=True, default=False)
+@click.option('--cpu', is_flag=True, default=False)
 def main(scenario: str, dataset: str, approach: str, overselect: float, forecast_error: str,
-         imbalanced_scenario: bool, mock: bool, seed: Optional[int]):
-    assert overselect >= 1
-    clients_per_round = int(CLIENTS_PER_ROUND * overselect)
+         imbalanced_scenario: bool, mock: bool, seed: Optional[int], runs: Optional[int], iid: Optional[bool], cpu: Optional[bool]):
+    for i in range(0, runs):
+        assert overselect >= 1
+        clients_per_round = int(CLIENTS_PER_ROUND * overselect)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"USING DEVICE: {device}")
+        device = torch.device("cuda:0" if (torch.cuda.is_available() and not cpu) else "cpu")
+        print(f"USING DEVICE: {device}")
 
-    net_arch, net_arch_size_factor, optimizer, opt_args, proximal_mu, beta = get_model_and_hyperparameters(dataset, iid=False)
+        net_arch, net_arch_size_factor, optimizer, opt_args, proximal_mu, beta = get_model_and_hyperparameters(dataset, iid=iid)
 
-    if "fedzero" not in approach:
-        forecast_error = "no_error"  # performance optimization, no other approach makes use of forecasts
-    scenario = get_scenario(scenario,
-                            net_arch_size_factor=net_arch_size_factor,
-                            forecast_error=forecast_error,
-                            imbalanced_scenario=imbalanced_scenario)
-    if approach == "random":
-        selection_strategy = RandomSelectionStrategy(clients_per_round=clients_per_round, seed=seed)
-    elif approach == "random_fc":
-        selection_strategy = RandomSelectionStrategy(clients_per_round=clients_per_round, seed=seed,
-                                                     use_forecasts=True, min_epochs=MIN_LOCAL_EPOCHS)
-    elif approach == "fedzero_static":
-        selection_strategy = FedZeroSelectionStrategy(
-            clients_per_round=clients_per_round,
-            utility_judge=StaticJudge(scenario.client_load_api.get_clients()),
-            alpha=0,
-            exclusion_factor=0,
-            min_epochs=MIN_LOCAL_EPOCHS,
-            max_epochs=MAX_LOCAL_EPOCHS,
-            seed=seed,
-        )
-    elif "fedzero" in approach:
-        split = approach.split("_")
-        assert len(split) == 3, ("Invalid approach format: FedZero has the format fedzero_{alpha}_{exclusion_factor}, "
-                                 "e.g. fedzero_1_1")
-        selection_strategy = FedZeroSelectionStrategy(
-            clients_per_round=clients_per_round,
-            utility_judge=StatUtilityJudge(scenario.client_load_api.get_clients()),
-            alpha=float(split[1]),
-            exclusion_factor=float(split[2]),
-            min_epochs=MIN_LOCAL_EPOCHS,
-            max_epochs=MAX_LOCAL_EPOCHS,
-            seed=seed,
-        )
-    elif approach == "oort":
-        selection_strategy = OortSelectionStrategy(clients_per_round=clients_per_round, seed=seed)
-    elif approach == "oort_fc":
-        selection_strategy = OortSelectionStrategy(clients_per_round=clients_per_round, use_forecasts=True, seed=seed)
-    else:
-        raise click.ClickException(f"Unknown approach: {approach}")
-
-    experiment = Experiment(scenario=scenario,
-                            selection_strategy=selection_strategy,
-                            overselect=overselect,
-                            net_arch=net_arch,
-                            optimizer=optimizer,
-                            opt_args=opt_args,
-                            beta=beta,
-                            proximal_mu=proximal_mu,
-                            dataset=dataset)
-    simulate_fl_training(experiment, device, mock)
+        if "fedzero" not in approach:
+            forecast_error = "no_error"  # performance optimization, no other approach makes use of forecasts
+        scenario = get_scenario(scenario,
+                                net_arch_size_factor=net_arch_size_factor,
+                                forecast_error=forecast_error,
+                                imbalanced_scenario=imbalanced_scenario)
+        if approach == "random":
+            selection_strategy = RandomSelectionStrategy(clients_per_round=clients_per_round, seed=seed)
+        elif approach == "random_fc":
+            selection_strategy = RandomSelectionStrategy(clients_per_round=clients_per_round, seed=seed,
+                                                        use_forecasts=True, min_epochs=MIN_LOCAL_EPOCHS)
+        elif approach == "fedzero_static":
+            selection_strategy = FedZeroSelectionStrategy(
+                clients_per_round=clients_per_round,
+                utility_judge=StaticJudge(scenario.client_load_api.get_clients()),
+                alpha=0,
+                exclusion_factor=0,
+                min_epochs=MIN_LOCAL_EPOCHS,
+                max_epochs=MAX_LOCAL_EPOCHS,
+                seed=seed,
+            )
+        elif "fedzero" in approach:
+            split = approach.split("_")
+            assert len(split) == 3, ("Invalid approach format: FedZero has the format fedzero_{alpha}_{exclusion_factor}, "
+                                    "e.g. fedzero_1_1")
+            selection_strategy = FedZeroSelectionStrategy(
+                clients_per_round=clients_per_round,
+                utility_judge=StatUtilityJudge(scenario.client_load_api.get_clients()),
+                alpha=float(split[1]),
+                exclusion_factor=float(split[2]),
+                min_epochs=MIN_LOCAL_EPOCHS,
+                max_epochs=MAX_LOCAL_EPOCHS,
+                seed=seed,
+            )
+        elif approach == "oort":
+            selection_strategy = OortSelectionStrategy(clients_per_round=clients_per_round, seed=seed)
+        elif approach == "oort_fc":
+            selection_strategy = OortSelectionStrategy(clients_per_round=clients_per_round, use_forecasts=True, seed=seed)
+        else:
+            raise click.ClickException(f"Unknown approach: {approach}")
+        
+        try:
+            experiment = Experiment(scenario=scenario,
+                                    selection_strategy=selection_strategy,
+                                    overselect=overselect,
+                                    net_arch=net_arch,
+                                    optimizer=optimizer,
+                                    opt_args=opt_args,
+                                    beta=beta,
+                                    proximal_mu=proximal_mu,
+                                    dataset=dataset)
+            simulate_fl_training(experiment, device, mock)
+            print(f"Finished Experiment {str(i)}")
+        except:
+            print("error, sleeping a few seconds!")
+            traceback.print_exc()
+            sleep(5)
+        
 
 
 if __name__ == "__main__":
