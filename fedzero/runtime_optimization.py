@@ -124,7 +124,7 @@ def _attribute_power(required_epochs, participation, available_energy, max_batch
     """Attributes power to all clients below <required_epochs>."""
     missing_batches = {c: c.batches_per_epoch * required_epochs - p for c, p in participation.items()}
     clients: list[Client] = [c for c in participation.keys() if missing_batches[c] > 0]
-    weighting = {c: missing_batches[c] * c.energy_per_batch for c in clients}
+    weighting = {c: missing_batches[c] * c.energy_per_batch for c in clients if (not c.is_brown)}
 
     model = grb.Model(name="Runtime power attribution model", env=GUROBI_ENV)
 

@@ -10,7 +10,7 @@ from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LO
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
-from fedzero.config import BROWN_CLIENTS_ALLOWANCE, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE
+from fedzero.config import BROWN_CLIENTS_ALLOWANCE, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE, BROWN_EXCLUSION_UPDATE
 
 _sum = grb.quicksum
 
@@ -94,7 +94,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
     @property
     def exclusion_factor(self):
-        if BROWN_CLIENTS_ALLOWANCE:
+        if BROWN_CLIENTS_ALLOWANCE and BROWN_EXCLUSION_UPDATE:
             return self._brown_exclusion_factor
         else:
             return self._exclusion_factor
@@ -102,7 +102,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     @exclusion_factor.setter
     def exclusion_factor(self, value):
         self._exclusion_factor = value
-        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self.exclusion_factor * 0.25)
+        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self._exclusion_factor * 0.25)
 
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
