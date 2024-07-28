@@ -77,7 +77,7 @@ def _execute_power_domain_round(power_domain_api: PowerDomainApi,
             continue
 
         # Minimum of how much the client can compute on excess capacity and until it reaches it max local epochs
-        max_batches = {
+        max_batches: dict = {
             c: int(min(client_load_api.actual(now, c.name), c.batches_per_epoch * max_epochs - participation[c])) 
             for c in participation.keys() if (not c.is_brown)
         }
@@ -138,7 +138,7 @@ def _attribute_power(required_epochs, participation, available_energy, max_batch
     x = model.addVar(lb=0, ub=_available_energy/EPSILON)
 
     model.addConstr(grb.quicksum(m[c] * c.energy_per_batch for c in clients if (not c.is_brown)) <= _available_energy)
-    for c in [_client for _client in clients if not _client.is_brown]:
+    for c in [_client for _client in clients if (not _client.is_brown)]:
         model.addGenConstrIndicator(y[c], False, m[c] == x * weighting[c])
         model.addGenConstrIndicator(y[c], True, m[c] >= max_batches[c])
         model.addGenConstrIndicator(y[c], True, x * weighting[c] >= max_batches[c])

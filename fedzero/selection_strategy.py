@@ -158,10 +158,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 for index, item in batches.items():
                     index: Client
                     energy[index] = item * index.energy_per_batch
-                # Sum Energy
-                limit = energy.sum()
                 # Define upper energy limit and lower client limit
-                limit = int(limit * BROWN_CLIENTS_BUDGET_PERCENTAGE)
+                limit = round(energy.sum() * BROWN_CLIENTS_BUDGET_PERCENTAGE)
                 brown_clients = [
                                  _client for _client in client_load_api.get_clients() if
                                  (_client not in filtered_clients_capacity)
@@ -169,8 +167,6 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                                 ]
                 brown_clients.extend(unused_green_clients)
                 min_brown_clients = min(len(brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
-                for client in brown_clients:
-                    client.is_brown = True
                 brown_solution = self._brown_selection(client_load_api, brown_clients, utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
                 if brown_solution is None or len(brown_solution.index) < min_brown_clients:
                     continue
@@ -179,6 +175,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 brown_energy = pd.Series()
                 for index, item in brown_batches.items():
                     index: Client
+                    index.is_brown = True
                     brown_energy[index] = item * index.energy_per_batch
                 # Sum Brown Energy
                 brown_energy_sum = brown_energy.sum()
@@ -313,7 +310,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
         df = df[np.isclose(selected_clients, 1)]
 
-        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}T")
+        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}min")
         return df.sort_index()
 
 
