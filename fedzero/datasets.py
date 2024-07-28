@@ -21,6 +21,19 @@ from fedzero.kwt.utils.dataset import get_loader
 
 ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
+def get_subset_indices(percentage: float, length: int):
+    if percentage >= 1:
+        return indices
+    percentage = round(round(percentage, 2) * 100)
+    indices = [i for i in range(length)]
+    to_remove = []
+
+    print("PERCENTAGE:", percentage, flush=True)
+    for i in indices:
+        if i % 100 >= percentage:
+            to_remove.append(i)
+
+    return [i for i in indices if not i in to_remove]
 
 def get_dataloaders(dataset: str, num_clients: int, batch_size: int, beta: float):
     np.random.seed(NIID_DATA_SEED)
@@ -73,9 +86,10 @@ def load_cifar(cifar_type: str, num_clients: int, batch_size: int, beta: float):
     #     targets = trainset.targets
     #     trainset = random_split(trainset, [round(DATA_SUBSET, 2), round(1 - DATA_SUBSET, 2)], torch.Generator().manual_seed(42))[0]
     #     trainset.targets = targets
-    indices = len(trainset)
-    _trainset = Subset(trainset, list(range(0, indices, round(1 / DATA_SUBSET))))
-    _trainset.targets = [trainset.targets[i] for i in range(0, indices, round(1 / DATA_SUBSET))]
+    print("ORIG DATASET: ", len(trainset), len(trainset.targets))
+    _trainset = Subset(trainset, get_subset_indices(DATA_SUBSET, len(trainset)))
+    _trainset.targets = [trainset.targets[i] for i in get_subset_indices(DATA_SUBSET, len(trainset.targets))]
+    print("DATASET: ", len(_trainset), len(_trainset.targets))
     trainset = _trainset
     trainloaders = []
     if 0.0 < beta < 1.0:

@@ -57,7 +57,7 @@ class Experiment:
                            f"{self.selection_strategy}{overselect_str}{error_str}")
 
         if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW:
-            experiment_name += f",Window={TIME_WINDOW_LOWER_BOUND}-{TIME_WINDOW_UPPER_BOUND}"
+            experiment_name += f",window={TIME_WINDOW_LOWER_BOUND}-{TIME_WINDOW_UPPER_BOUND}"
 
         i = 0
         while os.path.exists(f"runs/{experiment_name},i={i}"):
