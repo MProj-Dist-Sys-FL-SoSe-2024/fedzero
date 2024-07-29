@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from fedzero.config import NUM_CLIENTS, BATCH_SIZE, CLIENTS_PER_ROUND, MIN_LOCAL_EPOCHS, MAX_LOCAL_EPOCHS, \
     MAX_ROUNDS, RAY_CLIENT_RESOURCES, RAY_INIT_ARGS, SAVE_TRAINED_MODELS, ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW, \
-    TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND
+    TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE
 from fedzero.datasets import get_dataloaders
 from fedzero.fl_client import flwr_get_parameters, flwr_set_parameters, test, FedZeroClient, FedZeroClientMock
 from fedzero.fl_server import FedZeroServer
@@ -57,7 +57,7 @@ class Experiment:
                            f"{self.selection_strategy}{overselect_str}{error_str}")
 
         if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW:
-            experiment_name += f",window={TIME_WINDOW_LOWER_BOUND}-{TIME_WINDOW_UPPER_BOUND}"
+            experiment_name += f",window={TIME_WINDOW_LOWER_BOUND}-{TIME_WINDOW_UPPER_BOUND},brown-energy={BROWN_CLIENTS_BUDGET_PERCENTAGE},brown-clients={BROWN_CLIENTS_NUMBER_PERCENTAGE}"
 
         i = 0
         while os.path.exists(f"runs/{experiment_name},i={i}"):

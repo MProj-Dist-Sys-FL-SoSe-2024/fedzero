@@ -89,7 +89,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         self.max_epochs = max_epochs
         self.rng = np.random.default_rng(seed=seed)
 
-        self.excluded_clients: List[Client] = []
+        self.excluded_clients: Set[Client] = set()
         self.cycle_active_clients: Set[Client] = set()
         self.cycle_start: Optional[datetime] = None
         self.cycle_participation_mean = 0
@@ -104,7 +104,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     @exclusion_factor.setter
     def exclusion_factor(self, value):
         self._exclusion_factor = value
-        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self._exclusion_factor * 0.25)
+        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self._exclusion_factor * 0.33)
 
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
@@ -196,7 +196,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         print(f"| Excluding {int(len(participants) * self.exclusion_factor)} clients below statistical utility {utility_threshold:.12}.")
         for client in participants:
             if client.statistical_utility() <= utility_threshold:
-                self.excluded_clients.append(client)
+                self.excluded_clients.add(client)
 
         print(f"| Excluded clients after add: {len(self.excluded_clients)}")
         for i, client in enumerate(self.excluded_clients):
@@ -252,7 +252,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         selected_clients = pd.Series([var.X for var in b.values()], index=b.keys()).sort_index()
         df = df[np.isclose(selected_clients, 1)]
 
-        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}T")
+        df.columns = pd.date_range(start=now + pd.DateOffset(minutes=TIMESTEP_IN_MIN), periods=d, freq=f"{TIMESTEP_IN_MIN}min")
         return df.sort_index()
 
     def _optimal_selection(self,
