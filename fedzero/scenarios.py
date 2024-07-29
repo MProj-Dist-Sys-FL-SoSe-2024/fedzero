@@ -92,7 +92,7 @@ def _load_client_time_series_api(start_date: datetime, end_date: datetime,
                               energy_per_batch=client_sizes[client["size"]]["energy_per_batch"]))
 
     # Load actual data
-    index = pd.date_range(start_date, end_date, freq=f"{TIMESTEP_IN_MIN}T")
+    index = pd.date_range(start_date, end_date, freq=f"{TIMESTEP_IN_MIN}min")
     client_load = pd.read_csv("data/client_load_gpu_used.csv", nrows=len(index)) / 100
     client_load.set_index(index, inplace=True)
     client_load = client_load.set_axis(client_names, axis=1)

@@ -85,6 +85,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         self.utility_judge = utility_judge
         self.alpha = alpha
         self.exclusion_factor = exclusion_factor
+        self.current_round = -1
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs
         self.rng = np.random.default_rng(seed=seed)
@@ -96,7 +97,9 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
     @property
     def exclusion_factor(self):
-        if BROWN_CLIENTS_ALLOWANCE and BROWN_EXCLUSION_UPDATE:
+        if BROWN_CLIENTS_ALLOWANCE and BROWN_EXCLUSION_UPDATE \
+            and TIME_WINDOW_LOWER_BOUND <= self.current_round and self.current_round <= TIME_WINDOW_UPPER_BOUND:
+            print(f"Using Brown exclusion factor of {self._brown_exclusion_factor} instead of {self._exclusion_factor}")
             return self._brown_exclusion_factor
         else:
             return self._exclusion_factor
@@ -187,6 +190,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         return None  # if no solution found before max round durationself.round_prefer_duration
 
     def _update_excluded_clients(self, clients: List[Client], round_number: int, wallah) -> None:
+        self.current_round = round_number
         participants = {client for client in clients if client.participated_in_last_round(round_number)}
         if not participants:
             return
@@ -199,6 +203,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 self.excluded_clients.add(client)
 
         print(f"| Excluded clients after add: {len(self.excluded_clients)}")
+        to_remove: Set[Client] = set()
         for i, client in enumerate(self.excluded_clients):
             participated_rounds = client.participated_rounds - wallah
             if participated_rounds > 0:
@@ -210,9 +215,11 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             if self.rng.random() <= probability:
                 print(" SUCCESS")
                 if client in self.excluded_clients:
-                    self.excluded_clients.remove(client)
+                    to_remove.add(client)
+                    # self.excluded_clients.remove(client)
             else:
                 print("")
+        self.excluded_clients.difference_update(to_remove)
         print(f"| Excluded clients after remove: {len(self.excluded_clients)}")
         print("----------------------------------------------")
 
