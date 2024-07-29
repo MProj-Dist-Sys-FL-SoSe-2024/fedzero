@@ -22,10 +22,10 @@ from fedzero.kwt.utils.dataset import get_loader
 ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 def get_subset_indices(percentage: float, length: int):
+    indices = [i for i in range(length)]
     if percentage >= 1:
         return indices
     percentage = round(round(percentage, 2) * 100)
-    indices = [i for i in range(length)]
     to_remove = []
 
     print("PERCENTAGE:", percentage, flush=True)
