@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Set
+from warnings import warn
 
 import gurobipy as grb
 import numpy as np
@@ -107,7 +108,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
     @exclusion_factor.setter
     def exclusion_factor(self, value):
         self._exclusion_factor = value
-        self._brown_exclusion_factor = self._exclusion_factor - min(0.25, self._exclusion_factor * 0.33)
+        self._brown_exclusion_factor = self._exclusion_factor - min(0.33, self._exclusion_factor * 0.33)
 
     def __repr__(self):
         return f"fedzero_a{self.alpha}_e{self.exclusion_factor}"
@@ -133,6 +134,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
         # Filter clients if we are not inside the time window where brown clients are allowed
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
+        clients_capacity = _filterby_current_capacity(client_load_api, now)
         # update set of active clients for current cycle. Takes union of current set of active clients and the
         # set of clients that are currently available and have enough energy and capacity
         self.cycle_active_clients = self.cycle_active_clients.union(clients)
@@ -146,8 +148,10 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
         utility = self.utility_judge.utility()
         for d in range(1, int(MAX_ROUND_IN_MIN / TIMESTEP_IN_MIN) + 1):
+            # Potential Green Clients
             filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
-            filtered_clients_capacity = _filterby_current_capacity(client_load_api, clients, now, d, self.min_epochs)
+            # Potential Brown Clients - possibly including potential green clients
+            filtered_clients_capacity = _filterby_forecasted_capacity(client_load_api, clients_capacity, now, d, self.min_epochs)
             if len(filtered_clients) < self.clients_per_round:
                 continue
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
@@ -164,13 +168,13 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 # Define upper energy limit and lower client limit
                 limit = round(energy.sum() * BROWN_CLIENTS_BUDGET_PERCENTAGE)
                 brown_clients = [
-                                 _client for _client in client_load_api.get_clients() if
-                                 (_client not in filtered_clients_capacity)
-                                 and (_client not in self.excluded_clients)
+                                 _client for _client in filtered_clients_capacity if
+                                 (_client not in self.excluded_clients)
+                                 and (_client not in solution.index)
                                 ]
                 brown_clients.extend(unused_green_clients)
                 min_brown_clients = min(len(brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
-                brown_solution = self._brown_selection(client_load_api, brown_clients, utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
+                brown_solution = self._brown_selection(client_load_api, list(set(brown_clients)), utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
                 if brown_solution is None or len(brown_solution.index) < min_brown_clients:
                     continue
                 # Calc Brown Energy Series
@@ -183,7 +187,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                 # Sum Brown Energy
                 brown_energy_sum = brown_energy.sum()
                 if not (int(brown_energy_sum) <= limit * 1.01):
-                    raise RuntimeError(f"Brown Energy Limit Exceeded with {int(brown_energy_sum)} of {limit * 1.01}")
+                    raise RuntimeWarning(f"Brown Energy Limit Exceeded with {int(brown_energy_sum)} of {limit * 1.01}")
                 solution = pd.concat([solution, brown_solution])
             if solution is not None:
                 return solution
@@ -200,6 +204,8 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         print(f"| Excluding {int(len(participants) * self.exclusion_factor)} clients below statistical utility {utility_threshold:.12}.")
         for client in participants:
             if client.statistical_utility() <= utility_threshold:
+                if client in self.excluded_clients:
+                    warn(f"Client {client} is already in excluded clients set!!!")
                 self.excluded_clients.add(client)
 
         print(f"| Excluded clients after add: {len(self.excluded_clients)}")
@@ -381,6 +387,12 @@ def _estimate_duration_based_on_forecast(required_batches, fc):
             return i + remaining_batches / required_batches
     return required_batches / fc[0]
 
+def _filterby_current_capacity(client_load_api: ClientLoadApi,
+                                now: datetime) -> List[Client]:
+    clients = [client for client in client_load_api.get_clients() if
+               client_load_api.actual(now, client.name) > 0.0]
+    print(f"There are {len(clients)} potential brown clients available.")
+    return clients
 
 def _filterby_current_capacity_and_energy(power_domain_api: PowerDomainApi,
                                           client_load_api: ClientLoadApi,
@@ -392,7 +404,7 @@ def _filterby_current_capacity_and_energy(power_domain_api: PowerDomainApi,
     return clients
 
 
-def _filterby_current_capacity(client_load_api: ClientLoadApi,
+def _filterby_forecasted_capacity(client_load_api: ClientLoadApi,
                                 clients: List[Client],
                                 now: datetime,
                                 d: int,
