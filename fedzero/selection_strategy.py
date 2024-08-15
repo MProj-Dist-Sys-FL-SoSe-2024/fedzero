@@ -135,7 +135,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
         # Filter clients if we are not inside the time window where brown clients are allowed
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
-        clients_capacity = _filterby_current_capacity(client_load_api, now)
+        brown_clients = _filterby_current_capacity(client_load_api, now)
         # update set of active clients for current cycle. Takes union of current set of active clients and the
         # set of clients that are currently available and have enough energy and capacity
         self.cycle_active_clients = self.cycle_active_clients.union(clients)
@@ -152,14 +152,20 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             # Potential Green Clients
             filtered_clients = _filterby_forecasted_capacity_and_energy(power_domain_api, client_load_api, clients, now, d, self.min_epochs)
             # Potential Brown Clients - possibly including potential green clients
-            filtered_clients_capacity = _filterby_forecasted_capacity(client_load_api, clients_capacity, now, d, self.min_epochs)
-            if len(filtered_clients) < self.clients_per_round:
+            filtered_brown_clients = _filterby_forecasted_capacity(client_load_api, brown_clients, now, d, self.min_epochs)
+
+            if len(filtered_clients) < self.clients_per_round or len(filtered_brown_clients) < 1:
                 continue
+
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
+
+            filtered_brown_clients.extend(
+                [_client for _client in filtered_clients if _client not in solution.index]
+            )
+
             if solution is None:
                 continue
             if ENABLE_BROWN_CLIENTS and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND:
-                unused_green_clients = [_client for _client in filtered_clients if _client not in solution.index]
                 # Calc Energy Series
                 batches = solution.sum(axis=1)
                 energy = pd.Series()
@@ -168,27 +174,26 @@ class FedZeroSelectionStrategy(SelectionStrategy):
                     energy[index] = item * index.energy_per_batch
                 # Define upper energy limit and lower client limit
                 limit = round(energy.sum() * BROWN_CLIENTS_BUDGET_PERCENTAGE)
-                brown_clients = [
-                                 _client for _client in filtered_clients_capacity if
+                filtered_brown_clients = [
+                                 _client for _client in filtered_brown_clients if
                                  (_client not in self.excluded_clients)
                                  and (_client not in solution.index)
                                 ]
-                brown_clients.extend(unused_green_clients)
-                min_brown_clients = min(len(brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
-                brown_solution = self._brown_selection(client_load_api, list(set(brown_clients)), utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
+                min_brown_clients = min(len(filtered_brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
+                brown_solution = self._brown_selection(client_load_api, list(set(filtered_brown_clients)), utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
                 if brown_solution is None or len(brown_solution.index) < min_brown_clients:
                     continue
-                # Calc Brown Energy Series
+                # Calc Brown Energy
                 brown_batches = brown_solution.sum(axis=1)
                 brown_energy = pd.Series()
                 for index, item in brown_batches.items():
                     index: Client
                     index.is_brown = True
                     brown_energy[index] = item * index.energy_per_batch
-                # Sum Brown Energy
                 brown_energy_sum = brown_energy.sum()
                 if not (int(brown_energy_sum) <= limit * 1.01):
                     raise RuntimeWarning(f"Brown Energy Limit Exceeded with {int(brown_energy_sum)} of {limit * 1.01}")
+                
                 solution = pd.concat([solution, brown_solution])
             if solution is not None:
                 return solution
