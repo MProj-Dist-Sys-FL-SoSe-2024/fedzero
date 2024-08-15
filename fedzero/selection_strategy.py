@@ -8,11 +8,11 @@ import numpy as np
 import pandas as pd
 
 from fedzero.config import (TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS,
-                            ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW, TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND)
+                            ENABLE_BROWN_CLIENTS, TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND)
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
-from fedzero.config import BROWN_CLIENTS_ALLOWANCE, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE, BROWN_EXCLUSION_UPDATE
+from fedzero.config import BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE, BROWN_EXCLUSION_UPDATE
 
 _sum = grb.quicksum
 
@@ -98,8 +98,9 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
     @property
     def exclusion_factor(self):
-        if BROWN_CLIENTS_ALLOWANCE and BROWN_EXCLUSION_UPDATE \
-            and TIME_WINDOW_LOWER_BOUND <= self.current_round and self.current_round <= TIME_WINDOW_UPPER_BOUND:
+        if ENABLE_BROWN_CLIENTS and BROWN_EXCLUSION_UPDATE \
+            and TIME_WINDOW_LOWER_BOUND <= self.current_round \
+            and self.current_round <= TIME_WINDOW_UPPER_BOUND:
             print(f"Using Brown exclusion factor of {self._brown_exclusion_factor} instead of {self._exclusion_factor}")
             return self._brown_exclusion_factor
         else:
@@ -157,7 +158,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
             if solution is None:
                 continue
-            if ENABLE_BROWN_CLIENTS_DURING_TIME_WINDOW and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND:
+            if ENABLE_BROWN_CLIENTS and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND:
                 unused_green_clients = [_client for _client in filtered_clients if _client not in solution.index]
                 # Calc Energy Series
                 batches = solution.sum(axis=1)
