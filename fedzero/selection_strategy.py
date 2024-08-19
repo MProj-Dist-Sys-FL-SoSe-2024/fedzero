@@ -7,12 +7,12 @@ import gurobipy as grb
 import numpy as np
 import pandas as pd
 
-from fedzero.config import (TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS,
-                            ENABLE_BROWN_CLIENTS, TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND)
+from fedzero.config import TIMESTEP_IN_MIN, MAX_ROUND_IN_MIN, GUROBI_ENV, MIN_LOCAL_EPOCHS
+from fedzero.config import ENABLE_BROWN_CLIENTS, TIME_WINDOW_LOWER_BOUND, TIME_WINDOW_UPPER_BOUND, BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE, BROWN_EXCLUSION_UPDATE
 from fedzero.entities import PowerDomainApi, ClientLoadApi, Client
 from fedzero.oort import OortSelector
 from fedzero.utility import UtilityJudge
-from fedzero.config import BROWN_CLIENTS_BUDGET_PERCENTAGE, BROWN_CLIENTS_NUMBER_PERCENTAGE, BROWN_EXCLUSION_UPDATE
+
 
 _sum = grb.quicksum
 
@@ -133,8 +133,9 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             wallah = self.cycle_participation_mean + (current_mean - self.cycle_participation_mean) * factor
             print(f"Cycle mean: {self.cycle_participation_mean:.2f}, Current mean: {current_mean:.2f} factor: {factor}, result: {wallah} ###")
 
-        # Filter clients if we are not inside the time window where brown clients are allowed
+        # Filter clients by current capacity and energy
         clients = _filterby_current_capacity_and_energy(power_domain_api, client_load_api, now)
+        # Filter for brown clients by current capacity
         brown_clients = _filterby_current_capacity(client_load_api, now)
         # update set of active clients for current cycle. Takes union of current set of active clients and the
         # set of clients that are currently available and have enough energy and capacity
@@ -156,45 +157,67 @@ class FedZeroSelectionStrategy(SelectionStrategy):
 
             if len(filtered_clients) < self.clients_per_round or len(filtered_brown_clients) < 1:
                 continue
-
+            
+            # Find optimal selection of green clients
             solution = self._optimal_selection(power_domain_api, client_load_api, filtered_clients, utility, d=d, now=now)
 
+            if solution is None: # Increase duration, if no solution with green clients has been found
+                continue
+
+            # Add not selected green clients to possible brown clients
             filtered_brown_clients.extend(
                 [_client for _client in filtered_clients if _client not in solution.index]
             )
 
-            if solution is None:
-                continue
-            if ENABLE_BROWN_CLIENTS and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND:
-                # Calc Energy Series
+            if ENABLE_BROWN_CLIENTS and TIME_WINDOW_LOWER_BOUND <= round_number <= TIME_WINDOW_UPPER_BOUND: # Check if in Timewindow and Brown Clients are enabled
+                # Sum up the expected number of batches for each client
                 batches = solution.sum(axis=1)
                 energy = pd.Series()
+
+                # Multiply number of batches with the energy used per batch
                 for index, item in batches.items():
                     index: Client
                     energy[index] = item * index.energy_per_batch
-                # Define upper energy limit and lower client limit
+
+                # Define brown energy budget
                 limit = round(energy.sum() * BROWN_CLIENTS_BUDGET_PERCENTAGE)
+
+                # Update filtered brown clients; remove excluded clients and clients in solution
                 filtered_brown_clients = [
                                  _client for _client in filtered_brown_clients if
                                  (_client not in self.excluded_clients)
                                  and (_client not in solution.index)
                                 ]
+                
+                # Define minimum number of brown clients
+                # min of all brown clients or percentage of green clients per round
                 min_brown_clients = min(len(filtered_brown_clients), max(1, self.clients_per_round * BROWN_CLIENTS_NUMBER_PERCENTAGE))
+
+                # Find optimal selection of brown clients
                 brown_solution = self._brown_selection(client_load_api, list(set(filtered_brown_clients)), utility, d=d, l=limit, min_clients=min_brown_clients, now=now)
+
+                # If brown solution is not found, increase duration
                 if brown_solution is None or len(brown_solution.index) < min_brown_clients:
                     continue
-                # Calc Brown Energy
+
+                # Sum up the expected number of batches for each brown client
                 brown_batches = brown_solution.sum(axis=1)
                 brown_energy = pd.Series()
+
+                # Multiply number of batches with the energy used per batch
                 for index, item in brown_batches.items():
                     index: Client
                     index.is_brown = True
                     brown_energy[index] = item * index.energy_per_batch
+                
+                # Check if brown energy limit has not been exceeded
                 brown_energy_sum = brown_energy.sum()
                 if not (int(brown_energy_sum) <= limit * 1.01):
                     raise RuntimeWarning(f"Brown Energy Limit Exceeded with {int(brown_energy_sum)} of {limit * 1.01}")
                 
+                # Merge green and brown solutions
                 solution = pd.concat([solution, brown_solution])
+
             if solution is not None:
                 return solution
         return None  # if no solution found before max round durationself.round_prefer_duration
@@ -248,6 +271,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
         m_alloc = {(c, t): model.addVar(lb=0, ub=client_load_api.forecast(now + timedelta(minutes=TIMESTEP_IN_MIN * t), duration_in_timesteps=1, client_name=c.name).iloc[0]) for c in clients for t in range(d)}
         b = {c: model.addVar(vtype=grb.GRB.BINARY) for c in clients}
 
+        # Limit all used energy to the brown energy budget (l)
         model.addConstr(_sum(m_alloc[client, t] * client.energy_per_batch for client in clients for t in range(d)) <= l)
 
         for client in clients:
@@ -257,6 +281,7 @@ class FedZeroSelectionStrategy(SelectionStrategy):
             model.addGenConstrIndicator(b[client], True, max_batches >= _sum(m_alloc[client, t] for t in range(d)))
             model.addGenConstrIndicator(b[client], False, 0 >= _sum(m_alloc[client, t] for t in range(d)))
 
+        # Select at least min_clients
         model.addConstr(_sum(b[c] for c in clients) >= min_clients)
 
         model.ModelSense = grb.GRB.MAXIMIZE
