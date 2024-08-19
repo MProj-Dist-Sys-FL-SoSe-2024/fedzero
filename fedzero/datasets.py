@@ -8,6 +8,7 @@ import zipfile
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset, DataLoader, Subset
 import torch.utils.model_zoo as model_zoo
 import torchvision
 import torchvision.transforms as transforms
@@ -15,11 +16,24 @@ from scipy.special import softmax
 from torch.utils.data import Dataset, DataLoader, random_split, SubsetRandomSampler
 from tqdm import tqdm
 
-from fedzero.config import NIID_DATA_SEED
+from fedzero.config import NIID_DATA_SEED, DATA_SUBSET
 from fedzero.kwt.utils.dataset import get_loader
 
 ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
+def get_subset_indices(percentage: float, length: int):
+    indices = [i for i in range(length)]
+    if percentage >= 1:
+        return indices
+    percentage = round(round(percentage, 2) * 100)
+    to_remove = []
+
+    print("PERCENTAGE:", percentage, flush=True)
+    for i in indices:
+        if i % 100 >= percentage:
+            to_remove.append(i)
+
+    return [i for i in indices if not i in to_remove]
 
 def get_dataloaders(dataset: str, num_clients: int, batch_size: int, beta: float):
     np.random.seed(NIID_DATA_SEED)
@@ -61,12 +75,22 @@ def load_cifar(cifar_type: str, num_clients: int, batch_size: int, beta: float):
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
     ])
 
-    trainset = getattr(torchvision.datasets, cifar_type)(
+    trainset: Dataset = getattr(torchvision.datasets, cifar_type)(
         "./data", train=True, download=True, transform=train_transforms
     )
-    testset = getattr(torchvision.datasets, cifar_type)(
+    testset: Dataset = getattr(torchvision.datasets, cifar_type)(
         "./data", train=False, download=True, transform=test_transforms
     )
+    # DATA_SUBSET = 0.1
+    # if DATA_SUBSET < 1 and DATA_SUBSET > 0:
+    #     targets = trainset.targets
+    #     trainset = random_split(trainset, [round(DATA_SUBSET, 2), round(1 - DATA_SUBSET, 2)], torch.Generator().manual_seed(42))[0]
+    #     trainset.targets = targets
+    print("ORIG DATASET: ", len(trainset), len(trainset.targets))
+    _trainset = Subset(trainset, get_subset_indices(DATA_SUBSET, len(trainset)))
+    _trainset.targets = [trainset.targets[i] for i in get_subset_indices(DATA_SUBSET, len(trainset.targets))]
+    print("DATASET: ", len(_trainset), len(_trainset.targets))
+    trainset = _trainset
     trainloaders = []
     if 0.0 < beta < 1.0:
         client_to_data_ids = _get_niid_client_data_ids(trainset, num_clients, beta)

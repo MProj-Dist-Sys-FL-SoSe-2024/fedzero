@@ -5,7 +5,7 @@ from typing import List, Dict, Union
 import pandas as pd
 from vessim.signal import HistoricalSignal
 
-from fedzero.config import TIMESTEP_IN_MIN, SOLAR_SIZE, MAX_TIME_IN_DAYS, BATCH_SIZE
+from fedzero.config import TIMESTEP_IN_MIN, SOLAR_SIZE, MAX_TIME_IN_DAYS, BATCH_SIZE, DATA_SUBSET
 from fedzero.entities import Client, ClientLoadApi, PowerDomainApi
 
 _GLOBAL_START = pd.to_datetime("2022-06-08 00:00:00")
@@ -33,7 +33,7 @@ def get_scenario(solar_scenario: str,
     client_sizes = get_client_sizes(net_arch_size_factor)
 
     # Print information on sizing
-    max_solar_per_timestep = SOLAR_SIZE * 60 * TIMESTEP_IN_MIN
+    max_solar_per_timestep = SOLAR_SIZE * 60 * TIMESTEP_IN_MIN / round(1 / DATA_SUBSET)
     print(f"Max solar energy/timestep: {max_solar_per_timestep:.0f}  Ws")
     for size, props in client_sizes.items():
         batches_per_timestep = props["batches_per_timestep"]
@@ -92,7 +92,7 @@ def _load_client_time_series_api(start_date: datetime, end_date: datetime,
                               energy_per_batch=client_sizes[client["size"]]["energy_per_batch"]))
 
     # Load actual data
-    index = pd.date_range(start_date, end_date, freq=f"{TIMESTEP_IN_MIN}T")
+    index = pd.date_range(start_date, end_date, freq=f"{TIMESTEP_IN_MIN}min")
     client_load = pd.read_csv("data/client_load_gpu_used.csv", nrows=len(index)) / 100
     client_load.set_index(index, inplace=True)
     client_load = client_load.set_axis(client_names, axis=1)
@@ -126,15 +126,15 @@ def get_client_sizes(net_arch_size_factor) -> Dict[str, Dict[str, float]]:
     # A100: 400W, 1237 images/sec
     return {
         "small": {
-            "batches_per_timestep": 183 * 60 / BATCH_SIZE / 100 / net_arch_size_factor,
-            "energy_per_batch": 70 / 183 * BATCH_SIZE * 100 * net_arch_size_factor,
+            "batches_per_timestep": max(1, (183 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
+            "energy_per_batch": (70 / 183 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
         "mid": {
-            "batches_per_timestep": 639 * 60 / BATCH_SIZE / 100 / net_arch_size_factor,
-            "energy_per_batch": 300 / 639 * BATCH_SIZE * 100 * net_arch_size_factor,
+            "batches_per_timestep": max(1, (639 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
+            "energy_per_batch": (300 / 639 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
         "large": {
-            "batches_per_timestep": 1237 * 60 / BATCH_SIZE / 100 / net_arch_size_factor,
-            "energy_per_batch": 700 / 1237 * BATCH_SIZE * 100 * net_arch_size_factor,
+            "batches_per_timestep": max(1, (1237 * 60 / BATCH_SIZE / 100 / net_arch_size_factor) / round(1 / DATA_SUBSET)),
+            "energy_per_batch": (700 / 1237 * BATCH_SIZE * 100 * net_arch_size_factor),
         },
     }

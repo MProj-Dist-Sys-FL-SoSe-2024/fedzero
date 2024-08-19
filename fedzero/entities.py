@@ -20,6 +20,8 @@ class Client:
         self.num_samples = 0.0
         self._statistical_utilities: Dict = {}
 
+        self.is_brown = False
+
     @property
     def batches_per_epoch(self) -> int:
         return math.ceil(self.num_samples / BATCH_SIZE)
@@ -72,7 +74,8 @@ class ClientLoadApi:
         """Returns the actual amount of batches than can be computed during the next timestep."""
         if client_name in self._unconstrained:
             return self._clients[client_name].batches_per_timestep
-        return (1 - self.signal.at(dt, column=client_name)) * self._clients[client_name].batches_per_timestep
+        actual_batches = (1 - self.signal.at(dt, column=client_name)) * self._clients[client_name].batches_per_timestep
+        return round(actual_batches) if actual_batches < 1 else actual_batches
 
     def forecast(self, now: datetime, duration_in_timesteps: int, client_name: str) -> pd.Series:
         """Returns the forecasted amount of batches than can be computed during the next timesteps."""
